@@ -33,6 +33,11 @@ add_library(nlohmann_json INTERFACE)
 target_include_directories(nlohmann_json INTERFACE
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/nlohmann)
 
+# ---- 中间库输出目录：静态库等归 build/lib（随配置子目录 build/lib/Release），
+#      保持 build/Release 仅含可发布成品（Iris.exe）。与 googletest 既有布局一致。----
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
+
 # ---- SQLite（源码静态编译）----
 add_library(sqlite3 STATIC third_party/sqlite3/sqlite3.c)
 target_include_directories(sqlite3 PUBLIC third_party/sqlite3)
