@@ -206,14 +206,10 @@ void SearchWindow::mouseDoubleClickEvent(QMouseEvent* event) {
 
 void SearchWindow::mouseMoveEvent(QMouseEvent* event) {
     const int y = event->pos().y() - kShadowMargin;
-    bool changed = false;
+    // 悬停即选中（仅在列表区域内）；移出列表区不改变选中
     if (y >= kInputHeight) {
-        changed = resultList_.SetHoverByY(y - kInputHeight);
-    } else {
-        resultList_.ClearHover();
-        changed = true;  // 离开列表区域，清除悬停需要重绘
+        if (resultList_.SetHoverByY(y - kInputHeight)) update();
     }
-    if (changed) update();
 }
 
 void SearchWindow::wheelEvent(QWheelEvent* event) {
@@ -222,11 +218,6 @@ void SearchWindow::wheelEvent(QWheelEvent* event) {
         resultList_.ScrollBy(-steps);  // 向上滚 → 选择上移
         update();
     }
-}
-
-void SearchWindow::leaveEvent(QEvent*) {
-    resultList_.ClearHover();
-    update();
 }
 
 void SearchWindow::focusOutEvent(QFocusEvent* event) {

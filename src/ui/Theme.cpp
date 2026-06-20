@@ -11,7 +11,6 @@ Palette MakeLight() {
     Palette p;
     p.base            = QColor("#e9e9e9");
     p.inputBg         = QColor("#d2d2d2");
-    p.hoverRow        = QColor("#E7E7EC");
     p.accent          = QColor("#5a2178");
     p.hotkey          = QColor("#5a2178");   // Ctrl+数字
     p.accentSoft      = QColor("#D1C4E9");
@@ -31,7 +30,6 @@ Palette MakeDark() {
     Palette p;
     p.base            = QColor("#3e3e3e");
     p.inputBg         = QColor("#2f2f2f");
-    p.hoverRow        = QColor("#2A2A30");
     p.accent          = QColor("#328188");   // 品牌紫不变
     p.hotkey          = QColor("#9d9d9d");   // Ctrl+数字
     p.accentSoft      = QColor("#D1C4E9");   // 不变

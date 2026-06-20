@@ -16,7 +16,7 @@ namespace iris {
 class ResultListView {
 public:
     void SetResults(const QVector<ResultItem>& results);
-    void Clear() { results_.clear(); selectedIndex_ = 0; scrollOffset_ = 0; hoveredIndex_ = -1; }
+    void Clear() { results_.clear(); selectedIndex_ = 0; scrollOffset_ = 0; }
 
     int  GetCount() const { return results_.size(); }
     int  GetSelectedIndex() const { return selectedIndex_; }
@@ -27,8 +27,7 @@ public:
     void MoveSelectionDown();
     void ScrollBy(int delta);              // 鼠标滚轮：移动选择并保持可见
     void SelectByY(int yInList);           // 鼠标点击命中（相对列表顶部）
-    bool SetHoverByY(int yInList);         // 鼠标悬停命中；返回悬停行是否变化
-    void ClearHover() { hoveredIndex_ = -1; }
+    bool SetHoverByY(int yInList);         // 鼠标悬停命中 → 直接选中该行；返回选中是否变化
 
     void SetEmptyHint(const QString& hint) { emptyHint_ = hint; }
 
@@ -44,7 +43,7 @@ public:
     static constexpr int kEmptyHeight    = 80;
 
 private:
-    void PaintRow(QPainter& p, int rowIdx, const QRect& rowRect, bool hovered);
+    void PaintRow(QPainter& p, int rowIdx, const QRect& rowRect);
     void DrawGlobe(QPainter& p, const QRect& iconRect, const QColor& color);   // BOOKMARK 矢量地球仪
     void DrawEnterAction(QPainter& p, const QRect& rowRect);                   // 选中行右侧 enter.png
     void DrawShortcut(QPainter& p, const QRect& rowRect, int visibleNo);       // 常态行右侧 ctrl.png+N
@@ -58,7 +57,6 @@ private:
     QVector<ResultItem> results_;
     int selectedIndex_ = 0;
     int scrollOffset_  = 0;   // 第一个可见行的逻辑索引
-    int hoveredIndex_  = -1;
     QString emptyHint_{QString::fromUtf8("开始输入以搜索")};
 };
 

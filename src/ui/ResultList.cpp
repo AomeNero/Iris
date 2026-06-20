@@ -142,7 +142,6 @@ void ResultListView::SetResults(const QVector<ResultItem>& results) {
     results_ = results;
     if (selectedIndex_ >= results_.size()) selectedIndex_ = results_.size() - 1;
     if (selectedIndex_ < 0) selectedIndex_ = 0;
-    hoveredIndex_ = -1;
     EnsureBounds();
     EnsureSelectionVisible();
 }
@@ -202,11 +201,8 @@ void ResultListView::SelectByY(int y) {
 }
 
 bool ResultListView::SetHoverByY(int y) {
-    if (results_.isEmpty()) {
-        const bool changed = (hoveredIndex_ != -1);
-        hoveredIndex_ = -1;
-        return changed;
-    }
+    // 悬停即选中（与键盘上下选统一为单一选中状态）
+    if (results_.isEmpty()) return false;
     const int visible = VisibleCount();
     int acc = 0;
     int hit = scrollOffset_ + visible - 1;
@@ -216,8 +212,9 @@ bool ResultListView::SetHoverByY(int y) {
         if (y < acc + rowH) { hit = idx; break; }
         acc += rowH;
     }
-    if (hit == hoveredIndex_) return false;
-    hoveredIndex_ = hit;
+    if (hit == selectedIndex_) return false;
+    selectedIndex_ = hit;
+    EnsureSelectionVisible();
     return true;
 }
 
@@ -267,24 +264,18 @@ void ResultListView::DrawShortcut(QPainter& p, const QRect& r, int visibleNo) {
                Qt::AlignLeft | Qt::AlignVCenter, text);
 }
 
-void ResultListView::PaintRow(QPainter& p, int rowIdx, const QRect& r, bool hovered) {
+void ResultListView::PaintRow(QPainter& p, int rowIdx, const QRect& r) {
     const ResultItem& item = results_[rowIdx];
     const bool selected = (rowIdx == selectedIndex_);
     const Palette& pal = CurrentPalette();
     const int padH = 18;
-    const int iconSize = selected ? 64 : 56;
+    const int iconSize = 60;  // 选中/未选中统一图标大小
 
     // 行背景：左右各 18px(padH) 间距、12px 圆角的圆角矩形
-    // 选中=皇家紫；常态=#e9e9e9（与窗体基底一致，常态不浮现色块）；悬停=极淡
+    // 选中=皇家紫；常态=基底色（悬停即选中，无独立悬停态）
     const QRect bgRect = r.adjusted(padH, 0, -padH, 0);
     p.setPen(Qt::NoPen);
-    if (selected) {
-        p.setBrush(pal.accent);
-    } else if (hovered) {
-        p.setBrush(pal.hoverRow);
-    } else {
-        p.setBrush(pal.base);
-    }
+    p.setBrush(selected ? pal.accent : pal.base);
     p.drawRoundedRect(bgRect, 12, 12);
 
     // 图标距行左侧边框 36px（背景圆角矩形左缘在 padH=18，图标位于其内侧）
@@ -309,7 +300,7 @@ void ResultListView::PaintRow(QPainter& p, int rowIdx, const QRect& r, bool hove
             p.setBrush(selected ? pal.iconFallbackSel : pal.iconFallback);
             p.drawRoundedRect(iconRect, 10, 10);
             p.setPen(selected ? pal.selectedFg : pal.textSecondary);
-            QFont f("Microsoft YaHei", selected ? 22 : 18); f.setBold(true);
+            QFont f("Microsoft YaHei", 20); f.setBold(true);
             p.setFont(f);
             p.drawText(iconRect, Qt::AlignCenter, titleQ.left(1).toUpper());
         }
@@ -384,8 +375,7 @@ void ResultListView::Paint(QPainter& p, const QRect& listRect) {
     for (int vi = 0; vi < visible; ++vi) {
         const int idx = scrollOffset_ + vi;
         const int rowH = VisibleRowHeight(idx);
-        PaintRow(p, idx, QRect(listRect.left(), y, listRect.width(), rowH),
-                 idx == hoveredIndex_);
+        PaintRow(p, idx, QRect(listRect.left(), y, listRect.width(), rowH));
         y += rowH;
     }
     // 规格：行间无任何缝隙或分割线 —— 故不画分隔线。

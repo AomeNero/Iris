@@ -14,8 +14,7 @@ enum class Theme { Light, Dark };
 struct Palette {
     QColor base;             // 窗体基底 + 常态行底
     QColor inputBg;          // 输入框底
-    QColor hoverRow;         // 悬停行底
-    QColor accent;           // 品牌紫：选中行底 
+    QColor accent;           // 品牌紫：选中行底
     QColor hotkey;           // Ctrl+数字 快捷字颜色
     QColor accentSoft;       // 选中行副标题文字
     QColor textPrimary;      // 常态标题文字
