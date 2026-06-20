@@ -18,11 +18,12 @@ public:
                                  HistoryStore* history,
                                  int maxResults);
 
-    // 权重（公开便于测试/调参）
-    static constexpr float kWeightPosition   = 0.30f;
-    static constexpr float kWeightCoverage   = 0.15f;
-    static constexpr float kWeightType       = 0.05f;
-    static constexpr float kWeightPathDepth  = 0.10f;
+    // 权重（公开便于测试/调参；和 = 1.0）
+    // type 权重提高到 0.20：默认搜索时类型优先级 APP > FILE > BOOKMARK 显著
+    static constexpr float kWeightPosition   = 0.25f;
+    static constexpr float kWeightCoverage   = 0.10f;
+    static constexpr float kWeightType       = 0.20f;
+    static constexpr float kWeightPathDepth  = 0.05f;
     static constexpr float kWeightHistory    = 0.40f;
 
     static int TypeScore(ItemType type);

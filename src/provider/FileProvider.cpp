@@ -269,17 +269,31 @@ void FileProvider::FallbackScan(const VolumeInfo& vol, IndexStore& store,
     // 用目录路径字符串做去重的 dirId
     std::unordered_map<std::wstring, uint16_t> dirIdByPath;
 
-    for (auto& entry : fs::recursive_directory_iterator(vol.rootPath,
-            fs::directory_options::skip_permission_denied, ec)) {
+    // 显式遍历：reparse point（junction/symlink）目录 disable_recursion_pending 不进入，
+    // 杜绝 AppData\Local\Application Data 这类循环 junction（指向自身）导致
+    // recursive_directory_iterator 无限递归、路径无限增长直至崩溃 0xc0000409。
+    // 注意：std::filesystem 的 symlink_status().type() 对 junction 不一定返回 reparse_point，
+    // 故改用 GetFileAttributesW 的 FILE_ATTRIBUTE_REPARSE_POINT 位（Windows 原生，可靠）。
+    uint64_t files = 0, reparseSkipped = 0;
+    auto it = fs::recursive_directory_iterator(vol.rootPath,
+            fs::directory_options::skip_permission_denied, ec);
+    for (const auto end = fs::recursive_directory_iterator(); it != end; it.increment(ec)) {
         if (ec) { ec.clear(); continue; }
-        const auto& path = entry.path();
+        const auto& path = it->path();
+
+        const DWORD attrs = GetFileAttributesW(path.c_str());
+        if (attrs == INVALID_FILE_ATTRIBUTES) continue;  // 无权访问等，跳过
+
+        if (attrs & FILE_ATTRIBUTE_REPARSE_POINT) {
+            ++reparseSkipped;
+            it.disable_recursion_pending();  // 不进入 junction/symlink 子目录
+            continue;
+        }
+        if (attrs & FILE_ATTRIBUTE_DIRECTORY) continue;  // 目录不入文件索引
+
         const std::wstring fname = path.filename().wstring();
         if (fname.empty()) continue;
-
-        DWORD attrs = GetFileAttributesW(path.c_str());
-        if (attrs == INVALID_FILE_ATTRIBUTES) continue;
         if (ShouldExclude(attrs, fname)) continue;
-        if (attrs & FILE_ATTRIBUTE_DIRECTORY) continue;
 
         std::wstring dir = path.parent_path().wstring();
         uint16_t dirId = 0;
@@ -304,7 +318,11 @@ void FileProvider::FallbackScan(const VolumeInfo& vol, IndexStore& store,
         e.flags      = 0;
         e.usnLow     = 0;
         store.Insert(e);
+        ++files;
     }
+    IRIS_LOG_INFO(L"FallbackScan 完成: " + vol.rootPath +
+                  L" 文件=" + std::to_wstring(files) +
+                  L" 跳过reparse=" + std::to_wstring(reparseSkipped));
 }
 
 // ============================================================================

@@ -119,6 +119,12 @@ std::wstring GetKnownFolderPath(REFKNOWNFOLDERID rfid) {
     return result;
 }
 
+std::wstring GetExeDir() {
+    WCHAR exePath[MAX_PATH] = {};
+    GetModuleFileNameW(nullptr, exePath, MAX_PATH);
+    return std::filesystem::path(exePath).parent_path().wstring();
+}
+
 std::vector<UwpAppInfo> EnumerateUwpApps() {
     return {};  // P2 stub，后续用 PackageManager COM 实现
 }

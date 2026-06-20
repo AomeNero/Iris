@@ -50,10 +50,10 @@ std::vector<ResultItem> Ranker::Rank(std::vector<MatchResult>& matches,
             historyScore = HistoryScore(history->GetOpenCount(ri.path));
         }
 
-        // finalScore = 相关度(position+coverage, 合并到 rawScore)×0.45
-        //            + 类型×0.05 + 路径深度×0.10 + 历史×0.40
+        // finalScore = 相关度(position+coverage, 合并到 rawScore)×0.35
+        //            + 类型×0.20 + 路径深度×0.05 + 历史×0.40
         // 权重和 = 1.0（详见设计 §7.4；position/coverage 已并入 rawScore）
-        const float relevanceWeight = kWeightPosition + kWeightCoverage;  // 0.45
+        const float relevanceWeight = kWeightPosition + kWeightCoverage;  // 0.35
         const int finalScore = static_cast<int>(
             m.rawScore            * relevanceWeight +
             TypeScore(type)       * kWeightType +

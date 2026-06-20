@@ -31,6 +31,7 @@ struct ResultItem {
     int          score    = 0;     // 搜索得分（Engine 填入）
     int          openCount = 0;
     uint32_t     pathDepth = 0;
+    uint8_t      source   = 0;      // 数据源标识（BOOKMARK 用：0=Chrome, 1=Edge）
 };
 static_assert(sizeof(ResultItem) <= 200, "ResultItem 过大，仅 9 条无需极致压缩");
 

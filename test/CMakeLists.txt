@@ -45,8 +45,8 @@ add_iris_test(test_data_model test_data_model.cpp)
 
 # ---- 模块 3：Config ----
 add_iris_test(test_config
-    test_config.cpp ${SRC}/core/Config.cpp
-    LINK shell32 ole32)
+    test_config.cpp ${SRC}/core/Config.cpp ${SRC}/core/WinUtil.cpp
+    LINK shell32 ole32 oleaut32 advapi32 user32)
 
 # ---- 模块 4：FileProvider::ShouldExclude ----
 add_iris_test(test_file_provider
@@ -100,3 +100,27 @@ add_iris_test(test_search_engine NOMAIN
     ${SRC}/core/StringUtil.cpp
     ${SRC}/core/Logger.cpp
     LINK sqlite3)
+
+# ---- 模块 6b：BookmarkProvider（JSON 解析）----
+add_iris_test(test_bookmark_provider
+    test_bookmark_provider.cpp
+    ${SRC}/provider/BookmarkProvider.h
+    ${SRC}/provider/BookmarkProvider.cpp
+    ${SRC}/provider/IProvider.h
+    ${SRC}/provider/ISearchableProvider.h
+    ${SRC}/core/StringUtil.cpp
+    ${SRC}/core/Logger.cpp
+    ${SRC}/core/WinUtil.cpp
+    LINK shell32 ole32 oleaut32 advapi32 user32)
+
+# ---- 模块 6c：AppProvider（去重逻辑；.lnk/COM 解析留端到端）----
+add_iris_test(test_app_provider
+    test_app_provider.cpp
+    ${SRC}/provider/AppProvider.h
+    ${SRC}/provider/AppProvider.cpp
+    ${SRC}/provider/IProvider.h
+    ${SRC}/provider/ISearchableProvider.h
+    ${SRC}/core/StringUtil.cpp
+    ${SRC}/core/Logger.cpp
+    ${SRC}/core/WinUtil.cpp
+    LINK shell32 ole32 oleaut32 advapi32 user32)

@@ -3,8 +3,7 @@
 
 #include <nlohmann/json.hpp>
 
-#include <windows.h>
-#include <shlobj.h>
+#include "core/WinUtil.h"  // GetExeDir（便携式数据目录）
 
 #include <fstream>
 #include <memory>
@@ -13,16 +12,6 @@ namespace iris {
 
 namespace {
 std::filesystem::path g_dataDirOverride;  // 仅测试用（Config::SetDataDirForTest）
-
-std::filesystem::path AppDataDir() {
-    PWSTR p = nullptr;
-    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_RoamingAppData, 0, nullptr, &p))) {
-        std::filesystem::path dir = std::filesystem::path(p) / L"IrisSearch";
-        CoTaskMemFree(p);
-        return dir;
-    }
-    return std::filesystem::current_path() / L"IrisSearch";
-}
 } // namespace
 
 void Config::SetDataDirForTest(const std::filesystem::path& dir) { g_dataDirOverride = dir; }
@@ -34,7 +23,7 @@ Config& Config::Instance() {
 
 std::filesystem::path Config::GetDataDir() const {
     if (!g_dataDirOverride.empty()) return g_dataDirOverride;
-    return AppDataDir();
+    return std::filesystem::path(WinUtil::GetExeDir());  // 便携式：数据随 Iris.exe
 }
 std::filesystem::path Config::GetConfigPath() const  { return GetDataDir() / L"config.json"; }
 std::filesystem::path Config::GetHistoryPath() const { return GetDataDir() / L"history.db"; }

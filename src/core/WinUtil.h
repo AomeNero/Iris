@@ -40,6 +40,9 @@ bool IsAutoStartEnabled();
 /// 已知文件夹路径（FOLDERID_RoamingAppData 等）
 std::wstring GetKnownFolderPath(REFKNOWNFOLDERID rfid);
 
+/// Iris.exe 所在目录（无尾随分隔符；便携式数据存储用）
+std::wstring GetExeDir();
+
 struct UwpAppInfo {
     std::wstring name;
     std::wstring appUserModelId;

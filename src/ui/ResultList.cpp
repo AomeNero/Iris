@@ -1,5 +1,6 @@
 // Iris UI —— ResultList 实现
 #include "ui/ResultList.h"
+#include "core/WinUtil.h"
 
 #include <QPainter>
 #include <QFontMetrics>
@@ -92,6 +93,48 @@ const QPixmap& EnterPixWhite() {
     }
     return pm;
 }
+
+// 查找浏览器 exe 路径（Chrome/Edge 常见安装位置），未找到返回空
+std::wstring FindBrowserExe(bool isEdge) {
+    auto firstExists = [](const wchar_t* const* paths, size_t n) -> std::wstring {
+        for (size_t i = 0; i < n; ++i) {
+            if (GetFileAttributesW(paths[i]) != INVALID_FILE_ATTRIBUTES) return paths[i];
+        }
+        return {};
+    };
+    if (isEdge) {
+        const wchar_t* const edgePaths[] = {
+            L"C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+            L"C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
+        };
+        return firstExists(edgePaths, 2);
+    }
+    const wchar_t* const chromePaths[] = {
+        L"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+        L"C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+    };
+    std::wstring found = firstExists(chromePaths, 2);
+    if (!found.empty()) return found;
+    // 兜底：用户安装到 LocalAppData
+    const std::wstring localApp = WinUtil::GetKnownFolderPath(FOLDERID_LocalAppData);
+    const std::wstring userChrome = localApp + L"\\Google\\Chrome\\Application\\chrome.exe";
+    if (GetFileAttributesW(userChrome.c_str()) != INVALID_FILE_ATTRIBUTES) return userChrome;
+    return {};
+}
+
+// 浏览器图标（按来源缓存；PaintRow 在 UI 线程单线程访问）
+const QPixmap& BrowserIcon(bool isEdge) {
+    static QPixmap chrome, edge;
+    static bool inited = false;
+    if (!inited) {
+        inited = true;
+        std::wstring c = FindBrowserExe(false);
+        if (!c.empty()) chrome = Icons().Get(c);
+        std::wstring e = FindBrowserExe(true);
+        if (!e.empty()) edge = Icons().Get(e);
+    }
+    return isEdge ? edge : chrome;
+}
 } // namespace
 
 void ResultListView::SetResults(const QVector<ResultItem>& results) {
@@ -179,7 +222,7 @@ bool ResultListView::SetHoverByY(int y) {
 
 int ResultListView::CalculateHeight() const {
     if (results_.isEmpty()) return 0;  // 空列表不占位（窗口只保留输入框）
-    return VisibleCount() * kRowHSelected;  // 等高 92
+    return VisibleCount() * kRowHSelected + 18;  // 末行与内容区底边留 18px
 }
 
 void ResultListView::DrawGlobe(QPainter& p, const QRect& r, const QColor& color) {
@@ -247,7 +290,13 @@ void ResultListView::PaintRow(QPainter& p, int rowIdx, const QRect& r, bool hove
                          iconSize, iconSize);
     const QString titleQ = QString::fromStdWString(item.title);
     if (item.type == ItemType::BOOKMARK) {
-        DrawGlobe(p, iconRect, selected ? Qt::white : QColor("#757575"));
+        const QPixmap& bico = BrowserIcon(item.source == 1);
+        if (!bico.isNull()) {
+            p.drawPixmap(iconRect, bico.scaled(iconSize, iconSize,
+                                               Qt::KeepAspectRatio, Qt::SmoothTransformation));
+        } else {
+            DrawGlobe(p, iconRect, selected ? Qt::white : QColor("#757575"));  // 兜底
+        }
     } else {
         const QPixmap ico = Icons().Get(item.path);
         if (!ico.isNull()) {
