@@ -1,0 +1,47 @@
+# 构建产物
+/build/
+/out/
+/build-*/
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+*.cmake.user
+CMakeUserPresets.json
+
+# MSVC / 编译器
+*.obj
+*.pdb
+*.ilk
+*.exp
+*.lib
+*.exe
+*.dll
+Debug/
+Release/
+x64/
+x86/
+.vs/
+*.suo
+*.user
+*.aps
+
+# Qt 生成
+moc_*.cpp
+moc_*.h
+qrc_*.cpp
+ui_*.h
+*.qmlc
+*.qmltc
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*~
+
+# 日志/数据（运行期生成）
+*.log
+history.db
+config.json
