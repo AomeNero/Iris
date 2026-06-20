@@ -87,14 +87,20 @@ std::wstring BuildDirPath(uint64_t dirFrn,
 // ============================================================================
 // 排除规则 [已确认 — B2]
 // ============================================================================
-bool FileProvider::ShouldExclude(DWORD fileAttributes, const std::wstring& fileName) {
-    if (fileAttributes & FILE_ATTRIBUTE_HIDDEN) return true;
-    if (fileAttributes & FILE_ATTRIBUTE_SYSTEM) return true;
+bool FileProvider::ShouldExclude(DWORD fileAttributes, const std::wstring& fileName,
+                                 bool excludeHidden, bool excludeSystem) {
+    if (excludeHidden && (fileAttributes & FILE_ATTRIBUTE_HIDDEN)) return true;
+    if (excludeSystem && (fileAttributes & FILE_ATTRIBUTE_SYSTEM)) return true;
     const std::wstring ext = StringUtil::ExtractExtension(fileName);
     if (std::find(kExcludedExtensions.begin(), kExcludedExtensions.end(), ext)
         != kExcludedExtensions.end())
         return true;
     return false;
+}
+
+void FileProvider::SetExcludeFlags(bool excludeHidden, bool excludeSystem) {
+    excludeHidden_ = excludeHidden;
+    excludeSystem_ = excludeSystem;
 }
 
 // ============================================================================
@@ -221,7 +227,7 @@ bool FileProvider::BuildVolumeIndex(const VolumeInfo& vol, IndexStore& store,
     // 第二遍：建文件条目
     for (auto& [frn, te] : all) {
         if (te.attributes & FILE_ATTRIBUTE_DIRECTORY) continue;  // 目录跳过
-        if (ShouldExclude(te.attributes, te.name)) continue;
+        if (ShouldExclude(te.attributes, te.name, excludeHidden_, excludeSystem_)) continue;
 
         auto dit = dirIdByFrn.find(te.parentFrn);
         uint16_t dirId = (dit != dirIdByFrn.end()) ? dit->second : 0;
@@ -293,7 +299,7 @@ void FileProvider::FallbackScan(const VolumeInfo& vol, IndexStore& store,
 
         const std::wstring fname = path.filename().wstring();
         if (fname.empty()) continue;
-        if (ShouldExclude(attrs, fname)) continue;
+        if (ShouldExclude(attrs, fname, excludeHidden_, excludeSystem_)) continue;
 
         std::wstring dir = path.parent_path().wstring();
         uint16_t dirId = 0;

@@ -1,5 +1,6 @@
 // Iris UI —— ResultList 实现
 #include "ui/ResultList.h"
+#include "ui/Theme.h"
 #include "core/WinUtil.h"
 
 #include <QPainter>
@@ -258,7 +259,7 @@ void ResultListView::DrawShortcut(QPainter& p, const QRect& r, int visibleNo) {
     // 纯字符 "ctrlN"（如 ctrl1、ctrl2），距右边框 40px
     QFont f("Microsoft YaHei", 16);
     p.setFont(f);
-    p.setPen(QColor("#5a2178"));
+    p.setPen(CurrentPalette().hotkey);
     const QString text = QString::fromUtf8("ctrl") + QString::number(visibleNo);
     const QFontMetrics fm(f);
     const int w = fm.horizontalAdvance(text);
@@ -269,6 +270,7 @@ void ResultListView::DrawShortcut(QPainter& p, const QRect& r, int visibleNo) {
 void ResultListView::PaintRow(QPainter& p, int rowIdx, const QRect& r, bool hovered) {
     const ResultItem& item = results_[rowIdx];
     const bool selected = (rowIdx == selectedIndex_);
+    const Palette& pal = CurrentPalette();
     const int padH = 18;
     const int iconSize = selected ? 64 : 56;
 
@@ -277,11 +279,11 @@ void ResultListView::PaintRow(QPainter& p, int rowIdx, const QRect& r, bool hove
     const QRect bgRect = r.adjusted(padH, 0, -padH, 0);
     p.setPen(Qt::NoPen);
     if (selected) {
-        p.setBrush(QColor("#5a2178"));
+        p.setBrush(pal.accent);
     } else if (hovered) {
-        p.setBrush(QColor("#E7E7EC"));
+        p.setBrush(pal.hoverRow);
     } else {
-        p.setBrush(QColor("#e9e9e9"));
+        p.setBrush(pal.base);
     }
     p.drawRoundedRect(bgRect, 12, 12);
 
@@ -295,7 +297,7 @@ void ResultListView::PaintRow(QPainter& p, int rowIdx, const QRect& r, bool hove
             p.drawPixmap(iconRect, bico.scaled(iconSize, iconSize,
                                                Qt::KeepAspectRatio, Qt::SmoothTransformation));
         } else {
-            DrawGlobe(p, iconRect, selected ? Qt::white : QColor("#757575"));  // 兜底
+            DrawGlobe(p, iconRect, selected ? pal.selectedFg : pal.textSecondary);  // 兜底
         }
     } else {
         const QPixmap ico = Icons().Get(item.path);
@@ -304,9 +306,9 @@ void ResultListView::PaintRow(QPainter& p, int rowIdx, const QRect& r, bool hove
                                               Qt::KeepAspectRatio, Qt::SmoothTransformation));
         } else {
             p.setPen(Qt::NoPen);
-            p.setBrush(selected ? QColor(255, 255, 255, 40) : QColor(200, 200, 200));
+            p.setBrush(selected ? pal.iconFallbackSel : pal.iconFallback);
             p.drawRoundedRect(iconRect, 10, 10);
-            p.setPen(selected ? Qt::white : QColor("#757575"));
+            p.setPen(selected ? pal.selectedFg : pal.textSecondary);
             QFont f("Microsoft YaHei", selected ? 22 : 18); f.setBold(true);
             p.setFont(f);
             p.drawText(iconRect, Qt::AlignCenter, titleQ.left(1).toUpper());
@@ -327,13 +329,13 @@ void ResultListView::PaintRow(QPainter& p, int rowIdx, const QRect& r, bool hove
     const int subTop = titleTop + tm.height();
 
     p.setFont(kTitleFont);
-    p.setPen(selected ? Qt::white : QColor("#212121"));
+    p.setPen(selected ? pal.selectedFg : pal.textPrimary);
     p.drawText(QRect(textX, titleTop, textW, tm.height()),
                Qt::AlignLeft | Qt::AlignVCenter,
                tm.elidedText(titleQ, Qt::ElideRight, textW));
 
     p.setFont(kSubFont);
-    p.setPen(selected ? QColor("#D1C4E9") : QColor("#757575"));
+    p.setPen(selected ? pal.accentSoft : pal.textSecondary);
     const QString subQ = QString::fromStdWString(item.subtitle);
     p.drawText(QRect(textX, subTop, textW, sm.height()),
                Qt::AlignLeft | Qt::AlignVCenter,
@@ -368,7 +370,7 @@ void ResultListView::DrawScrollBar(QPainter& p, const QRect& listRect) const {
     const int handleY = trackTop + int((trackH - handleH) * pos);
 
     p.setPen(Qt::NoPen);
-    p.setBrush(QColor(120, 120, 130, 96));
+    p.setBrush(CurrentPalette().scrollbar);
     p.drawRoundedRect(QRect(trackX, handleY, 4, handleH), 2, 2);
 }
 

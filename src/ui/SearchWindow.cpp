@@ -1,5 +1,6 @@
 // Iris UI —— SearchWindow 实现
 #include "ui/SearchWindow.h"
+#include "ui/Theme.h"
 
 #include "core/WinUtil.h"
 #include "core/StringUtil.h"
@@ -71,7 +72,7 @@ void SearchWindow::paintEvent(QPaintEvent*) {
 
     // Layer 1: 灰基底 #e9e9e9（已移除原白底配套的顶部光泽——灰底上白光泽会把
     //         背景拉向白色、偏离 #e9e9e9）
-    p.fillRect(content, QColor("#e9e9e9"));
+    p.fillRect(content, CurrentPalette().base);
 
     // Layer 3-4: 输入栏
     const QRect inputRect = GetInputRect();
@@ -82,7 +83,7 @@ void SearchWindow::paintEvent(QPaintEvent*) {
 
     // Layer 6: 极细边框
     p.setClipping(false);
-    QPen borderPen(QColor(0, 0, 0, 20));
+    QPen borderPen(CurrentPalette().border);
     borderPen.setWidthF(0.5);
     p.setPen(borderPen);
     p.setBrush(Qt::NoBrush);

@@ -6,21 +6,18 @@
 #include <cstdint>
 #include <filesystem>
 #include <shared_mutex>
+#include <string>
 
 namespace iris {
 
 class Config {
 public:
-    struct HotkeyConfig {
-        // MOD_ALT=0x0001 MOD_CONTROL=0x0002 MOD_SHIFT=0x0004 MOD_WIN=0x0008
-        uint32_t modifiers = 0x0001;  // MOD_ALT
-        uint32_t vkCode    = 0x20;    // VK_SPACE
-    };
     struct ProviderConfig {
         bool enabled = true;
     };
     struct AppConfig {
-        HotkeyConfig hotkey;
+        std::string hotkey     = "Alt+Space";  // 形如 "Alt+Space"，由 HotkeyManager::Parse 解析
+        std::string theme      = "light";      // "light" / "dark"
         int  maxResults    = 9;
         bool autoStart     = true;
         bool excludeHidden = true;

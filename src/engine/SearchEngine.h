@@ -31,6 +31,8 @@ public:
                       std::shared_ptr<ISearchableProvider> bookmark,
                       std::shared_ptr<ISearchableProvider> app);
     void SetHistoryStore(HistoryStore* store);
+    /// 设置单次搜索返回的最大结果数（默认 9）。
+    void SetMaxResults(int n) { maxResults_ = n; }
 
     /// 异步搜索（内部自动取消上一次）。返回 requestId。
     int SearchAsync(const std::wstring& rawText);
@@ -58,6 +60,7 @@ private:
     std::shared_ptr<ISearchableProvider> bookmarkProvider_;
     std::shared_ptr<ISearchableProvider> appProvider_;
     HistoryStore* historyStore_ = nullptr;
+    int           maxResults_   = 9;
 
     std::shared_ptr<std::atomic<bool>> cancelFlag_;
     std::mutex                          cancelMutex_;

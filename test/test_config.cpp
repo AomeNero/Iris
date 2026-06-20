@@ -34,8 +34,8 @@ TEST_F(ConfigTest, LoadMissingReturnsDefaults) {
     EXPECT_TRUE(cfg.autoStart);
     EXPECT_TRUE(cfg.excludeHidden);
     EXPECT_TRUE(cfg.excludeSystem);
-    EXPECT_EQ(cfg.hotkey.modifiers, 0x0001u);  // MOD_ALT
-    EXPECT_EQ(cfg.hotkey.vkCode, 0x20u);       // VK_SPACE
+    EXPECT_EQ(cfg.hotkey, "Alt+Space");
+    EXPECT_EQ(cfg.theme, "light");
     EXPECT_TRUE(cfg.providers.file.enabled);
     EXPECT_TRUE(cfg.providers.bookmark.enabled);
     EXPECT_TRUE(cfg.providers.app.enabled);
@@ -46,7 +46,7 @@ TEST_F(ConfigTest, SaveThenLoadRoundTrip) {
     Config::AppConfig cfg = Config::Instance().Load();  // defaults
     cfg.maxResults = 5;
     cfg.autoStart  = false;
-    cfg.hotkey.vkCode = 0x41;  // 'A'
+    cfg.hotkey = "Alt+A";  // 'A'
     cfg.providers.bookmark.enabled = false;
 
     Config::Instance().Set(cfg);
@@ -55,7 +55,7 @@ TEST_F(ConfigTest, SaveThenLoadRoundTrip) {
     const Config::AppConfig loaded = Config::Instance().Load();  // 从磁盘重读
     EXPECT_EQ(loaded.maxResults, 5);
     EXPECT_FALSE(loaded.autoStart);
-    EXPECT_EQ(loaded.hotkey.vkCode, 0x41u);
+    EXPECT_EQ(loaded.hotkey, "Alt+A");
     EXPECT_FALSE(loaded.providers.bookmark.enabled);
     EXPECT_TRUE(loaded.providers.file.enabled);   // 未改动项保持默认
     EXPECT_TRUE(loaded.providers.app.enabled);

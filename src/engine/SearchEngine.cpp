@@ -82,7 +82,7 @@ void SearchEngine::DoSearch(std::shared_ptr<SearchContext> ctx) {
 
     if (ctx->cancelled->load(std::memory_order_acquire)) return;
 
-    auto results = ranker_.Rank(matches, historyStore_, 9);
+    auto results = ranker_.Rank(matches, historyStore_, maxResults_);
 
     if (ctx->cancelled->load(std::memory_order_acquire)) return;
 

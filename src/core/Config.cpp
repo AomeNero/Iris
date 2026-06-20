@@ -40,10 +40,8 @@ Config::AppConfig Config::Load() {
         try {
             nlohmann::json j;
             in >> j;
-            if (j.contains("hotkey") && j["hotkey"].is_object()) {
-                cfg.hotkey.modifiers = j["hotkey"].value("modifiers", cfg.hotkey.modifiers);
-                cfg.hotkey.vkCode    = j["hotkey"].value("vkCode", cfg.hotkey.vkCode);
-            }
+            cfg.hotkey        = j.value("hotkey", cfg.hotkey);          // 字符串，如 "Alt+Space"
+            cfg.theme         = j.value("theme", cfg.theme);            // "light" / "dark"
             cfg.maxResults    = j.value("max_results", cfg.maxResults);
             cfg.autoStart     = j.value("auto_start", cfg.autoStart);
             cfg.excludeHidden = j.value("exclude_hidden", cfg.excludeHidden);
@@ -76,7 +74,8 @@ void Config::Save() {
     std::filesystem::create_directories(path.parent_path(), ec);
 
     nlohmann::json j;
-    j["hotkey"] = {{"modifiers", cfg.hotkey.modifiers}, {"vkCode", cfg.hotkey.vkCode}};
+    j["hotkey"]         = cfg.hotkey;
+    j["theme"]          = cfg.theme;
     j["max_results"]    = cfg.maxResults;
     j["auto_start"]     = cfg.autoStart;
     j["exclude_hidden"] = cfg.excludeHidden;

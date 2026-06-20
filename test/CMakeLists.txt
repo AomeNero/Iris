@@ -124,3 +124,8 @@ add_iris_test(test_app_provider
     ${SRC}/core/Logger.cpp
     ${SRC}/core/WinUtil.cpp
     LINK shell32 ole32 oleaut32 advapi32 user32)
+
+# ---- hotkey：字符串 ↔ (modifiers, vkCode) ----
+add_iris_test(test_hotkey
+    test_hotkey.cpp
+    ${SRC}/core/HotkeySpec.cpp)

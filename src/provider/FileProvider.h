@@ -48,7 +48,12 @@ public:
 
     // ---- 排除规则（纯函数，供测试）----
     // fileAttributes: USN_RECORD 的 FileAttributes；不调 GetFileAttributesW。
-    static bool ShouldExclude(DWORD fileAttributes, const std::wstring& fileName);
+    // excludeHidden/excludeSystem 默认 true（保持旧行为）；由 SetExcludeFlags 按配置覆盖。
+    static bool ShouldExclude(DWORD fileAttributes, const std::wstring& fileName,
+                              bool excludeHidden = true, bool excludeSystem = true);
+
+    /// 按配置设置排除标志（须在 Initialize 前调用）。
+    void SetExcludeFlags(bool excludeHidden, bool excludeSystem);
 
 private:
     struct VolumeInfo {
@@ -85,6 +90,8 @@ private:
     std::atomic<bool>                 ready_{false};
     std::atomic<uint64_t>             totalFiles_{0};
     std::atomic<uint64_t>             totalDirs_{0};
+    bool                              excludeHidden_ = true;
+    bool                              excludeSystem_ = true;
 };
 
 } // namespace iris

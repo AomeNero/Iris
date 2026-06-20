@@ -22,12 +22,15 @@
 #include "provider/BookmarkProvider.h"
 #include "provider/AppProvider.h"
 #include "engine/SearchEngine.h"
+#include "core/Config.h"
+#include "core/HotkeySpec.h"
 #include "core/HistoryStore.h"
 #include "core/Logger.h"
 #include "core/WinUtil.h"
 #include "ui/SearchWindow.h"
 #include "ui/TrayIcon.h"
 #include "ui/HotkeyManager.h"
+#include "ui/Theme.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -38,6 +41,7 @@
 using iris::ResultItem;
 using iris::SearchWindow;
 using iris::SearchEngine;
+using iris::Config;
 using iris::HistoryStore;
 using iris::FileProvider;
 using iris::BookmarkProvider;
@@ -80,16 +84,25 @@ int main(int argc, char* argv[]) {
     iris::Logger::Init(exeDir / L"log");   // 日志进 exe 同级 log/（Logger 内部自动建目录）
     HistoryStore history(exeDir / L"Iris.db");
 
-    // ── 三个数据源（对象先创建并注入引擎；Initialize 在窗口显示后后台并行执行）──
-    auto file     = std::make_shared<FileProvider>();
-    auto bookmark = std::make_shared<BookmarkProvider>();
-    auto apps     = std::make_shared<AppProvider>();
+    // ── 配置：读 config.json（不存在则用默认值并落盘，供托盘“设置”编辑）──
+    auto cfg = Config::Instance().Load();
+    if (!std::filesystem::exists(Config::Instance().GetConfigPath())) {
+        Config::Instance().Save();  // 首次启动生成默认 config.json
+    }
+
+    // ── 三个数据源（按 config.providers 开关条件创建；Initialize 后台并行执行）──
+    auto file     = cfg.providers.file.enabled     ? std::make_shared<FileProvider>()     : nullptr;
+    auto bookmark = cfg.providers.bookmark.enabled ? std::make_shared<BookmarkProvider>() : nullptr;
+    auto apps     = cfg.providers.app.enabled      ? std::make_shared<AppProvider>()      : nullptr;
+    if (file) file->SetExcludeFlags(cfg.excludeHidden, cfg.excludeSystem);
 
     // ── 搜索引擎：注入 Provider + 历史（在后台 Initialize 启动前完成，
     //    happens-before：DoSearch 读取这些 shared_ptr 无数据竞争）──
     SearchEngine engine;
     engine.SetProviders(file, bookmark, apps);
     engine.SetHistoryStore(&history);
+    engine.SetMaxResults(cfg.maxResults);
+    iris::SetCurrentTheme(iris::ParseThemeName(cfg.theme));  // 主题：light/dark（启动时应用）
 
     SearchWindow w;
 
@@ -103,7 +116,10 @@ int main(int argc, char* argv[]) {
 
     // 全局热键 Alt+Space：toggle 显示/隐藏搜索框
     HotkeyManager hotkey;
-    hotkey.Register(MOD_ALT, VK_SPACE);
+    // 热键：解析 config 里的字符串（如 "Alt+Space"）；失败回退默认 Alt+Space
+    unsigned hkMods = MOD_ALT, hkVk = VK_SPACE;
+    iris::HotkeySpec::Parse(cfg.hotkey, hkMods, hkVk);
+    hotkey.Register(hkMods, hkVk);
     QObject::connect(&hotkey, &HotkeyManager::hotkeyPressed, &w, [&w]() {
         if (w.isVisible()) w.hideWithFadeOut();
         else               w.showWithFadeIn();
@@ -137,20 +153,22 @@ int main(int argc, char* argv[]) {
     });
     QObject::connect(&tray, &TrayIcon::reindexRequested, &tray,
         [&tray, &file, &bookmark, &apps]() {
-            file->Refresh();
-            bookmark->Refresh();
-            apps->Refresh();
+            if (file)     file->Refresh();
+            if (bookmark) bookmark->Refresh();
+            if (apps)     apps->Refresh();
             tray.ShowNotification(QString::fromUtf8("Iris"),
                                   QString::fromUtf8("重新索引完成"));
         });
     QObject::connect(&tray, &TrayIcon::settingsRequested, []() {
-        QMessageBox::information(nullptr, QString::fromUtf8("Iris 设置"),
-            QString::fromUtf8("设置功能将在后续版本提供。"));
+        // 打开 config.json 供用户编辑（重启 Iris 后生效）
+        const std::wstring p = Config::Instance().GetConfigPath().wstring();
+        ShellExecuteW(nullptr, L"open", p.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
     });
     QObject::connect(&tray, &TrayIcon::aboutRequested, []() {
         QMessageBox::information(nullptr, QString::fromUtf8("关于 Iris"),
-            QString::fromUtf8("Iris v1.0.0\n快速本地搜索工具\n\n"
-                              "像 Everything 一样快，像 Alfred 一样优雅。"));
+            QString::fromUtf8("Iris v1.0.0\n超级启动器\n"
+                              "能帮你秒开软件，还能搜文件和网络收藏夹哦！\n"
+                              "Author:AomeNero eMail:yotianya@gmail.com\n\n"));
     });
     QObject::connect(&tray, &TrayIcon::quitRequested, &app, &QApplication::quit);
 
@@ -165,9 +183,9 @@ int main(int argc, char* argv[]) {
     //    值捕获 shared_ptr（CLAUDE.md 硬性规则：跨线程 Lambda 禁止 [&]）。
     //    DoSearch 的 IsReady() 门控保证未就绪的 Provider 被自动跳过 → 增量就绪。──
     std::vector<std::thread> initThreads;
-    initThreads.emplace_back([file]()     { file->Initialize(); });
-    initThreads.emplace_back([bookmark]() { bookmark->Initialize(); });
-    initThreads.emplace_back([apps]()     { apps->Initialize(); });
+    if (file)     initThreads.emplace_back([file]()     { file->Initialize(); });
+    if (bookmark) initThreads.emplace_back([bookmark]() { bookmark->Initialize(); });
+    if (apps)     initThreads.emplace_back([apps]()     { apps->Initialize(); });
 
     const int ret = app.exec();
 
@@ -176,10 +194,10 @@ int main(int argc, char* argv[]) {
         if (t.joinable()) t.join();
     }
 
-    // 有序关闭
-    apps->Shutdown();
-    bookmark->Shutdown();
-    file->Shutdown();
+    // 有序关闭（仅关闭已启用的 Provider）
+    if (apps)     apps->Shutdown();
+    if (bookmark) bookmark->Shutdown();
+    if (file)     file->Shutdown();
     iris::Logger::Shutdown();
     return ret;
 }
