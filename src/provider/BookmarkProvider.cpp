@@ -137,7 +137,9 @@ bool BookmarkProvider::Rebuild() {
                   return _wcsicmp(a.title.c_str(), b.title.c_str()) < 0;
               });
 
+    const size_t count = entries.size();
     ReplaceEntries(std::make_shared<const std::vector<Entry>>(std::move(entries)));
+    IRIS_LOG_INFO(L"BookmarkProvider: 索引完成，书签数=" + std::to_wstring(count));
     return true;
 }
 

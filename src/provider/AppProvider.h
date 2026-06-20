@@ -62,7 +62,6 @@ private:
     std::shared_ptr<const std::vector<Entry>> entries_;
     mutable std::mutex swapMutex_;
     std::atomic<bool> ready_{false};
-    bool comInitialized_ = false;  // 是否在本对象内 CoInitialize（析构时配对 CoUninitialize）
 };
 
 } // namespace iris

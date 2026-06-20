@@ -8,6 +8,8 @@
 
 #include <filesystem>
 #include <memory>
+#include <thread>
+#include <vector>
 
 #include <QApplication>
 #include <QObject>
@@ -78,15 +80,13 @@ int main(int argc, char* argv[]) {
     iris::Logger::Init(exeDir / L"log");   // 日志进 exe 同级 log/（Logger 内部自动建目录）
     HistoryStore history(exeDir / L"Iris.db");
 
-    // ── 三个数据源（同步初始化；FileProvider 全盘 USN 扫描可能耗时数秒）──
+    // ── 三个数据源（对象先创建并注入引擎；Initialize 在窗口显示后后台并行执行）──
     auto file     = std::make_shared<FileProvider>();
     auto bookmark = std::make_shared<BookmarkProvider>();
     auto apps     = std::make_shared<AppProvider>();
-    file->Initialize();
-    bookmark->Initialize();
-    apps->Initialize();
 
-    // ── 搜索引擎：注入 Provider + 历史 ──
+    // ── 搜索引擎：注入 Provider + 历史（在后台 Initialize 启动前完成，
+    //    happens-before：DoSearch 读取这些 shared_ptr 无数据竞争）──
     SearchEngine engine;
     engine.SetProviders(file, bookmark, apps);
     engine.SetHistoryStore(&history);
@@ -154,14 +154,27 @@ int main(int argc, char* argv[]) {
     });
     QObject::connect(&tray, &TrayIcon::quitRequested, &app, &QApplication::quit);
 
-    w.showWithFadeIn();  // 输入框为空 → 列表不显示（仅输入框）
+    w.showWithFadeIn();  // 窗口先于索引显示（输入框为空 → 列表不显示，仅输入框）
 
     if (!trayOk) {
         QMessageBox::warning(nullptr, QString::fromUtf8("Iris"),
             QString::fromUtf8("系统托盘不可用，窗口关闭后进程将驻留。"));
     }
 
+    // ── 后台并行索引：窗口已显示，三个 Provider 的 Initialize 不阻塞 UI。
+    //    值捕获 shared_ptr（CLAUDE.md 硬性规则：跨线程 Lambda 禁止 [&]）。
+    //    DoSearch 的 IsReady() 门控保证未就绪的 Provider 被自动跳过 → 增量就绪。──
+    std::vector<std::thread> initThreads;
+    initThreads.emplace_back([file]()     { file->Initialize(); });
+    initThreads.emplace_back([bookmark]() { bookmark->Initialize(); });
+    initThreads.emplace_back([apps]()     { apps->Initialize(); });
+
     const int ret = app.exec();
+
+    // 先 join 索引线程（确保 Initialize 已结束），再 Shutdown（避免与 Initialize 并发竞争）
+    for (auto& t : initThreads) {
+        if (t.joinable()) t.join();
+    }
 
     // 有序关闭
     apps->Shutdown();

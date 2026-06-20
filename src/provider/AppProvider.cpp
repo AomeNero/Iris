@@ -45,10 +45,6 @@ bool AppProvider::Initialize() {
 void AppProvider::Shutdown() {
     ReplaceEntries(nullptr);
     ready_.store(false, std::memory_order_release);
-    if (comInitialized_) {
-        CoUninitialize();
-        comInitialized_ = false;
-    }
 }
 
 void AppProvider::Refresh() {
@@ -59,16 +55,14 @@ void AppProvider::Refresh() {
 }
 
 bool AppProvider::Rebuild() {
-    // WinUtil::ResolveShortcut 走 IShellLink COM，要求调用方已 CoInitialize
-    if (!comInitialized_) {
-        const HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
-        IRIS_LOG_INFO(L"AppProvider: CoInitializeEx hr=0x" +
+    // WinUtil::ResolveShortcut 走 IShellLink COM。对称配对（同线程 CoInit/CoUninit），
+    // 使本方法无论由 Initialize 的索引线程还是 Refresh 的 UI 线程调用都能正确配对。
+    // S_OK / S_FALSE 均算成功（S_FALSE=本线程已同模型初始化），需配对 CoUninitialize。
+    const HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    const bool didInit = SUCCEEDED(hr);
+    if (FAILED(hr) && hr != RPC_E_CHANGED_MODE) {
+        IRIS_LOG_WARN(L"AppProvider: CoInitializeEx 失败 hr=0x" +
                       std::to_wstring(static_cast<unsigned long>(hr)));
-        if (SUCCEEDED(hr)) {
-            comInitialized_ = true;
-        } else if (hr != RPC_E_CHANGED_MODE) {
-            IRIS_LOG_WARN(L"AppProvider: CoInitializeEx 失败");
-        }
     }
 
     std::vector<Entry> entries;
@@ -98,6 +92,8 @@ bool AppProvider::Rebuild() {
     IRIS_LOG_INFO(L"AppProvider: 索引完成，应用数=" + std::to_wstring(entries.size()));
 
     ReplaceEntries(std::make_shared<const std::vector<Entry>>(std::move(entries)));
+
+    if (didInit) CoUninitialize();  // 与 Rebuild 开头的 CoInitializeEx 同线程配对
     return true;
 }
 
