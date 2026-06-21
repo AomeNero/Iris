@@ -41,6 +41,13 @@ ui_*.h
 *.swp
 *~
 
+#提示词
+doc/
+CLAUDE.md
+
+#codegraph
+.codegraph/
+
 # 日志/数据（运行期生成）
 *.log
 history.db
