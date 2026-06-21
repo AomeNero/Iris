@@ -26,6 +26,10 @@ public:
     void showWithFadeIn();
     void hideWithFadeOut();
 
+    /// 弹应用自身模态对话框（关于/警告）期间置 true：阻止失焦自动隐藏。
+    /// 否则对话框夺焦 → hideWithFadeOut，本窗口在模态恢复激活时崩溃。
+    void SetSuppressAutoHide(bool suppress) { suppressAutoHide_ = suppress; }
+
 signals:
     void searchRequested(const QString& text);
     void itemActivated(const ResultItem& item);
@@ -49,6 +53,7 @@ private:
     QRect GetInputRect() const;
     QRect GetListRect() const;
     void OpenSelected();
+    void OpenByVisibleNo(int visibleNo);  // Ctrl+1..9：打开第N可见行（对应右侧 ctrlN 提示）
 
     SearchBar     searchBar_;
     ResultListView resultList_;
@@ -56,6 +61,7 @@ private:
     QString inputText_;
     QTimer  cursorTimer_;
     bool    cursorVisible_ = true;
+    bool    suppressAutoHide_ = false;  // 弹模态对话框期间抑制失焦自动隐藏
 
     static constexpr int kWindowWidth  = 1440;
     static constexpr int kInputHeight   = SearchBar::kHeight;   // 100

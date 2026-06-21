@@ -22,6 +22,7 @@ public:
     int  GetSelectedIndex() const { return selectedIndex_; }
     bool HasSelection() const { return selectedIndex_ >= 0 && selectedIndex_ < results_.size(); }
     const ResultItem* GetSelected() const;
+    const ResultItem* GetVisibleItem(int visibleNo) const;  // 第N可见行(1..9)，与右侧 ctrlN 提示一一对应
 
     void MoveSelectionUp();
     void MoveSelectionDown();

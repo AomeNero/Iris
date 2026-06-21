@@ -141,6 +141,13 @@ void SearchWindow::OpenSelected() {
     }
 }
 
+void SearchWindow::OpenByVisibleNo(int visibleNo) {
+    if (const ResultItem* item = resultList_.GetVisibleItem(visibleNo)) {
+        emit itemActivated(*item);
+        hideWithFadeOut();
+    }
+}
+
 void SearchWindow::keyPressEvent(QKeyEvent* event) {
     switch (event->key()) {
         case Qt::Key_Escape:
@@ -163,6 +170,14 @@ void SearchWindow::keyPressEvent(QKeyEvent* event) {
             resultList_.MoveSelectionDown();
             update();
             return;
+        case Qt::Key_1: case Qt::Key_2: case Qt::Key_3:
+        case Qt::Key_4: case Qt::Key_5: case Qt::Key_6:
+        case Qt::Key_7: case Qt::Key_8: case Qt::Key_9:
+            if (event->modifiers() & Qt::ControlModifier) {
+                OpenByVisibleNo(event->key() - Qt::Key_0);  // ctrlN 提示对应 Ctrl+N
+                return;
+            }
+            break;  // 非 Ctrl：作为数字输入字符，落到下方追加逻辑
         case Qt::Key_Backspace:
             if (!inputText_.isEmpty()) {
                 inputText_.chop(1);
@@ -221,8 +236,15 @@ void SearchWindow::wheelEvent(QWheelEvent* event) {
 }
 
 void SearchWindow::focusOutEvent(QFocusEvent* event) {
-    // 失焦（点击外部）淡出隐藏
-    if (!isHidden()) hideWithFadeOut();
+    // 失焦（点击外部其他窗口）淡出隐藏；但以下不隐藏：
+    //  - 焦点转给弹出菜单（PopupFocusReason，如托盘右键菜单）：
+    //    否则点菜单项弹对话框时本窗口早已被隐藏，对话框关闭后无法恢复焦点
+    //  - 弹应用自身模态对话框期间（suppressAutoHide_ 守卫）
+    if (!suppressAutoHide_
+        && event->reason() != Qt::PopupFocusReason
+        && !isHidden()) {
+        hideWithFadeOut();
+    }
     QWidget::focusOutEvent(event);
 }
 

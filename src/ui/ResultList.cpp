@@ -151,6 +151,14 @@ const ResultItem* ResultListView::GetSelected() const {
     return &results_[selectedIndex_];
 }
 
+const ResultItem* ResultListView::GetVisibleItem(int visibleNo) const {
+    // 与 DrawShortcut 的 ctrlN 完全对应：第N个可见行 = scrollOffset_+N-1
+    if (visibleNo < 1 || visibleNo > kMaxVisibleRows) return nullptr;
+    const int idx = scrollOffset_ + visibleNo - 1;
+    if (idx < 0 || idx >= results_.size()) return nullptr;
+    return &results_[idx];
+}
+
 void ResultListView::EnsureBounds() {
     if (results_.isEmpty()) { selectedIndex_ = 0; scrollOffset_ = 0; return; }
     if (selectedIndex_ < 0) selectedIndex_ = 0;

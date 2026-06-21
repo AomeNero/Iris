@@ -75,6 +75,7 @@ int main(int argc, char* argv[]) {
     QApplication app(argc, argv);
     app.setApplicationName("Iris");
     app.setOrganizationName("IrisSearch");
+    app.setQuitOnLastWindowClosed(false);  // 托盘驻留：QMessageBox 等关闭不退出，仅托盘"退出"菜单退出
 
     // QVector<ResultItem> 跨线程 queued 传递需注册（engine 工作线程 → UI 线程）
     qRegisterMetaType<QVector<ResultItem>>("QVector<ResultItem>");
@@ -164,19 +165,30 @@ int main(int argc, char* argv[]) {
         const std::wstring p = Config::Instance().GetConfigPath().wstring();
         ShellExecuteW(nullptr, L"open", p.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
     });
-    QObject::connect(&tray, &TrayIcon::aboutRequested, []() {
+    QObject::connect(&tray, &TrayIcon::aboutRequested, [&w]() {
+        w.SetSuppressAutoHide(true);   // 对话框夺焦期间阻止自动隐藏，避免模态恢复崩溃
         QMessageBox::information(nullptr, QString::fromUtf8("关于 Iris"),
             QString::fromUtf8("Iris v1.0.0\n超级启动器\n"
                               "能帮你秒开软件，还能搜文件和网络收藏夹哦！\n"
                               "Author:AomeNero eMail:yotianya@gmail.com\n\n"));
+        // 对话框关闭后主动夺回焦点（Qt::Tool 窗口不会自动重新获焦，否则卡住）
+        w.activateWindow();
+        w.raise();
+        w.setFocus(Qt::OtherFocusReason);
+        w.SetSuppressAutoHide(false);
     });
     QObject::connect(&tray, &TrayIcon::quitRequested, &app, &QApplication::quit);
 
     w.showWithFadeIn();  // 窗口先于索引显示（输入框为空 → 列表不显示，仅输入框）
 
     if (!trayOk) {
+        w.SetSuppressAutoHide(true);
         QMessageBox::warning(nullptr, QString::fromUtf8("Iris"),
             QString::fromUtf8("系统托盘不可用，窗口关闭后进程将驻留。"));
+        w.activateWindow();
+        w.raise();
+        w.setFocus(Qt::OtherFocusReason);
+        w.SetSuppressAutoHide(false);
     }
 
     // ── 后台并行索引：窗口已显示，三个 Provider 的 Initialize 不阻塞 UI。
