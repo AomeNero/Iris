@@ -26,55 +26,62 @@ int Ranker::HistoryScore(int openCount) {
     return s > 100.0 ? 100 : static_cast<int>(s);
 }
 
-namespace {
-struct Scored {
-    MatchResult m;
-    int         finalScore;
-};
-} // namespace
-
 std::vector<ResultItem> Ranker::Rank(std::vector<MatchResult>& matches,
                                      HistoryStore* history, int maxResults) {
-    std::vector<Scored> scored;
-    scored.reserve(matches.size());
+    if (matches.empty()) return {};
+    const float relevanceWeight = kWeightPosition + kWeightCoverage;  // 0.35
 
+    // 阶段1：粗排（全量、廉价——不查历史、不拼路径）。
+    // 百万级 matches 下避免全量 GetOpenCount（每次 SQL prepare+lock）+ BuildResultItem（路径拼接）。
+    struct Coarse { const MatchResult* m; int score; };
+    std::vector<Coarse> coarse;
+    coarse.reserve(matches.size());
     for (auto& m : matches) {
         if (!m.provider) continue;
         const ItemType type = m.provider->GetType(m.entryIndex);
         const uint8_t depth = m.provider->GetPathDepth(m.entryIndex);
+        coarse.push_back({&m, static_cast<int>(
+            m.rawScore            * relevanceWeight +
+            TypeScore(type)       * kWeightType +
+            PathDepthScore(depth) * kWeightPathDepth)});
+    }
+    if (coarse.empty()) return {};
 
+    // 粗排取前 K（O(n) nth_element）。历史 0.40 权重在阶段2 补；K 足够覆盖高相关度项。
+    constexpr int kTopK = 256;
+    const int k = std::min(static_cast<int>(coarse.size()), kTopK);
+    std::nth_element(coarse.begin(), coarse.begin() + k, coarse.end(),
+                     [](const Coarse& a, const Coarse& b) { return a.score > b.score; });
+
+    // 阶段2：精排前 K（查历史 + 完整分数 = 相关度+类型+路径深度+历史）
+    struct Fine { const MatchResult* m; int score; };
+    std::vector<Fine> fine;
+    fine.reserve(k);
+    for (int i = 0; i < k; ++i) {
+        const MatchResult& m = *coarse[i].m;
+        const ItemType type = m.provider->GetType(m.entryIndex);
+        const uint8_t depth = m.provider->GetPathDepth(m.entryIndex);
         int historyScore = 0;
         if (history) {
-            // 用完整路径查询打开次数
             const ResultItem ri = m.provider->BuildResultItem(m.entryIndex);
             historyScore = HistoryScore(history->GetOpenCount(ri.path));
         }
-
-        // finalScore = 相关度(position+coverage, 合并到 rawScore)×0.35
-        //            + 类型×0.20 + 路径深度×0.05 + 历史×0.40
-        // 权重和 = 1.0（详见设计 §7.4；position/coverage 已并入 rawScore）
-        const float relevanceWeight = kWeightPosition + kWeightCoverage;  // 0.35
-        const int finalScore = static_cast<int>(
+        fine.push_back({&m, static_cast<int>(
             m.rawScore            * relevanceWeight +
             TypeScore(type)       * kWeightType +
             PathDepthScore(depth) * kWeightPathDepth +
-            historyScore          * kWeightHistory);
-
-        scored.push_back({m, finalScore});
+            historyScore          * kWeightHistory)});
     }
+    std::sort(fine.begin(), fine.end(),
+              [](const Fine& a, const Fine& b) { return a.score > b.score; });
 
-    std::sort(scored.begin(), scored.end(),
-              [](const Scored& a, const Scored& b) { return a.finalScore > b.finalScore; });
-
+    const int n = std::min(static_cast<int>(fine.size()), maxResults);
     std::vector<ResultItem> out;
-    const int n = static_cast<int>(scored.size()) < maxResults
-                      ? static_cast<int>(scored.size())
-                      : maxResults;
     out.reserve(n);
     for (int i = 0; i < n; ++i) {
-        const MatchResult& m = scored[i].m;
+        const MatchResult& m = *fine[i].m;
         ResultItem item = m.provider->BuildResultItem(m.entryIndex);
-        item.score = scored[i].finalScore;
+        item.score = fine[i].score;
         out.push_back(std::move(item));
     }
     return out;
