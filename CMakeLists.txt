@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(Iris VERSION 1.0.0 LANGUAGES CXX)
+project(Iris VERSION 1.0.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -61,7 +61,7 @@ target_link_libraries(Iris PRIVATE
     Qt5::Core Qt5::Gui Qt5::Widgets Qt5::Svg Qt5::WinExtras
     Qt5::WinMain                              # Qt5 静态 WIN32 子系统的 WinMain
     nlohmann_json sqlite3
-    advapi32 shell32 ole32 oleaut32 user32 gdi32)
+    advapi32 shell32 ole32 oleaut32 user32 gdi32 imm32)
 # 静态 Qt5：排除 QTiffPlugin（其依赖 Qt5::Zlib 在本静态 Qt 安装中缺失）
 qt5_import_plugins(Iris EXCLUDE Qt5::QTiffPlugin)
 set_target_properties(Iris PROPERTIES

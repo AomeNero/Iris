@@ -12,7 +12,7 @@ SearchBar::SearchBar() {
     icon_.load(":/iris.png");  // 由 resources.qrc 提供（前缀 :/）
 }
 
-void SearchBar::Paint(QPainter& p, const QRect& rect, const QString& text,
+void SearchBar::Paint(QPainter& p, const QRect& rect, const QString& text, const QString& preedit,
                       bool cursorVisible, bool hasFocus) {
     p.setRenderHint(QPainter::Antialiasing);
 
@@ -33,15 +33,31 @@ void SearchBar::Paint(QPainter& p, const QRect& rect, const QString& text,
     const int textLeft  = box.left() + kPadH;
     const int textRight = box.right() - kPadH;
 
-    if (!text.isEmpty()) {
-        p.setPen(CurrentPalette().inputText);
+    const int textW    = fm.horizontalAdvance(text);
+    const int preeditW = preedit.isEmpty() ? 0 : fm.horizontalAdvance(preedit);
+
+    if (!text.isEmpty() || !preedit.isEmpty()) {
         const int maxTextW = textRight - textLeft;
-        p.drawText(QRect(textLeft, box.top(), maxTextW, box.height()),
-                   Qt::AlignLeft | Qt::AlignVCenter,
-                   fm.elidedText(text, Qt::ElideRight, maxTextW));
+        // 已提交文本（正常色，超宽右截断）
+        if (!text.isEmpty()) {
+            p.setPen(CurrentPalette().inputText);
+            p.drawText(QRect(textLeft, box.top(), maxTextW, box.height()),
+                       Qt::AlignLeft | Qt::AlignVCenter,
+                       fm.elidedText(text, Qt::ElideRight, maxTextW));
+        }
+        // 预编辑文本（拼音实时预览）：下划线，紧跟已提交文本
+        if (!preedit.isEmpty()) {
+            QFont pf = font_;
+            pf.setUnderline(true);
+            p.setFont(pf);
+            p.setPen(CurrentPalette().inputText);
+            const int preeditX = textLeft + textW;
+            p.drawText(QRect(preeditX, box.top(), qMax(0, textRight - preeditX), box.height()),
+                       Qt::AlignLeft | Qt::AlignVCenter, preedit);
+            p.setFont(font_);
+        }
         if (cursorVisible && hasFocus) {
-            const int textW = fm.horizontalAdvance(text);
-            const int cursorX = qMin(textLeft + textW + 1, textRight);
+            const int cursorX = qMin(textLeft + textW + preeditW + 1, textRight);
             const int cursorY = box.top() + (box.height() - cursorH) / 2;
             p.fillRect(QRect(cursorX, cursorY, kCursorW, cursorH), CurrentPalette().inputText);
         }

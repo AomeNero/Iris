@@ -70,3 +70,22 @@ TEST_F(ConfigTest, CorruptFileFallsBackToDefaults) {
     const auto cfg = Config::Instance().Load();
     EXPECT_EQ(cfg.maxResults, 9);  // 默认值
 }
+
+// config.json 含注释（// 行内、/* */ 块）→ 注释应被忽略，配置正常生效
+// 回归：曾因不解析注释导致整个文件回退默认，max_results 等配置静默失效
+TEST_F(ConfigTest, CommentsAreIgnored) {
+    {
+        std::ofstream out(tmp_ / L"config.json");
+        out << R"({
+  "max_results": 15,  // 行内注释：结果上限
+  "auto_start": false,
+  /* 块注释：
+     跨越多行 */
+  "hotkey": "Ctrl+Space"
+})";
+    }
+    const auto loaded = Config::Instance().Load();
+    EXPECT_EQ(loaded.maxResults, 15);   // 关键：注释未导致回退默认
+    EXPECT_FALSE(loaded.autoStart);
+    EXPECT_EQ(loaded.hotkey, "Ctrl+Space");
+}

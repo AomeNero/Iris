@@ -14,6 +14,7 @@
 #include "ui/ResultList.h"
 
 class QPropertyAnimation;
+class QInputMethodEvent;
 
 namespace iris {
 
@@ -47,6 +48,7 @@ protected:
     void focusOutEvent(QFocusEvent* event) override;
     bool nativeEvent(const QByteArray& eventType, void* message, long* result) override;
     QVariant inputMethodQuery(Qt::InputMethodQuery query) const override;
+    void inputMethodEvent(QInputMethodEvent* event) override;  // 接收 IME 提交文本，支持中文输入
 
 private:
     void RebuildLayout();
@@ -59,9 +61,14 @@ private:
     ResultListView resultList_;
 
     QString inputText_;
+    QString preeditText_;              // IME 预编辑文本（拼音实时预览）
     QTimer  cursorTimer_;
     bool    cursorVisible_ = true;
     bool    suppressAutoHide_ = false;  // 弹模态对话框期间抑制失焦自动隐藏
+    // IME 状态：弹出时强制英文输入模式，隐藏时恢复原模式
+    bool          imeSaved_      = false;
+    unsigned long imeConversion_ = 0;
+    unsigned long imeSentence_   = 0;
 
     static constexpr int kWindowWidth  = 1440;
     static constexpr int kInputHeight   = SearchBar::kHeight;   // 100

@@ -16,7 +16,7 @@ public:
     SearchBar();
 
     // 由 SearchWindow::paintEvent 调用
-    void Paint(QPainter& p, const QRect& rect, const QString& text,
+    void Paint(QPainter& p, const QRect& rect, const QString& text, const QString& preedit,
                bool cursorVisible, bool hasFocus);
 
     const QFont& Font() const { return font_; }

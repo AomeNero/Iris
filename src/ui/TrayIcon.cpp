@@ -5,6 +5,7 @@
 #include <QMenu>
 #include <QAction>
 #include <QIcon>
+#include <QSignalBlocker>
 
 namespace iris {
 
@@ -42,16 +43,25 @@ void TrayIcon::BuildMenu() {
 
     QAction* aSearch   = contextMenu_->addAction(QString::fromUtf8("搜索"));
     QAction* aReindex  = contextMenu_->addAction(QString::fromUtf8("重新索引"));
+    aAutoStart_ = contextMenu_->addAction(QString::fromUtf8("开机自启"));
+    aAutoStart_->setCheckable(true);
     QAction* aSettings = contextMenu_->addAction(QString::fromUtf8("设置"));
     QAction* aAbout    = contextMenu_->addAction(QString::fromUtf8("关于"));
     contextMenu_->addSeparator();
     QAction* aQuit     = contextMenu_->addAction(QString::fromUtf8("退出"));
 
-    connect(aSearch,   &QAction::triggered, this, [this] { emit searchRequested(); });
-    connect(aReindex,  &QAction::triggered, this, [this] { emit reindexRequested(); });
-    connect(aSettings, &QAction::triggered, this, [this] { emit settingsRequested(); });
-    connect(aAbout,    &QAction::triggered, this, [this] { emit aboutRequested(); });
-    connect(aQuit,     &QAction::triggered, this, [this] { emit quitRequested(); });
+    connect(aSearch,     &QAction::triggered, this, [this] { emit searchRequested(); });
+    connect(aReindex,    &QAction::triggered, this, [this] { emit reindexRequested(); });
+    connect(aAutoStart_, &QAction::toggled,   this, [this](bool on) { emit autoStartToggled(on); });
+    connect(aSettings,   &QAction::triggered, this, [this] { emit settingsRequested(); });
+    connect(aAbout,      &QAction::triggered, this, [this] { emit aboutRequested(); });
+    connect(aQuit,       &QAction::triggered, this, [this] { emit quitRequested(); });
+}
+
+void TrayIcon::SetAutoStartChecked(bool checked) {
+    if (!aAutoStart_) return;
+    QSignalBlocker blocker(aAutoStart_);  // 抑制 setChecked 触发的 toggled，避免误写注册表
+    aAutoStart_->setChecked(checked);
 }
 
 void TrayIcon::ShowNotification(const QString& title, const QString& message) {

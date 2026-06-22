@@ -38,8 +38,9 @@ Config::AppConfig Config::Load() {
     std::ifstream in(path);
     if (in) {
         try {
-            nlohmann::json j;
-            in >> j;
+            // ignore_comments=true：容忍 // 与 /* */ 注释，避免用户给 config.json
+            // 加注释说明时整体解析失败、静默回退默认值（曾导致 max_results 等配置不生效）
+            nlohmann::json j = nlohmann::json::parse(in, nullptr, true, true);
             cfg.hotkey        = j.value("hotkey", cfg.hotkey);          // 字符串，如 "Alt+Space"
             cfg.theme         = j.value("theme", cfg.theme);            // "light" / "dark"
             cfg.maxResults    = j.value("max_results", cfg.maxResults);

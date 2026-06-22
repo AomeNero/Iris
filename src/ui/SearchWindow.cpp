@@ -13,6 +13,7 @@
 #include <QFocusEvent>
 #include <QFontMetrics>
 #include <QPropertyAnimation>
+#include <QInputMethodEvent>
 #include <QApplication>
 #include <QRect>
 
@@ -21,12 +22,14 @@
 #endif
 #include <windows.h>
 #include <windowsx.h>
+#include <imm.h>           // Imm* 输入法状态（弹出强制英文 / 隐藏恢复）
 
 namespace iris {
 
 SearchWindow::SearchWindow(QWidget* parent) : QWidget(parent) {
     setWindowFlags(Qt::Tool | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint);
     setAttribute(Qt::WA_TranslucentBackground);
+    setAttribute(Qt::WA_InputMethodEnabled, true);  // 启用输入法，支持中文 IME 输入
 
     setMouseTracking(true);  // 悬停高亮需要无按钮鼠标移动事件
 
@@ -76,7 +79,7 @@ void SearchWindow::paintEvent(QPaintEvent*) {
 
     // Layer 3-4: 输入栏
     const QRect inputRect = GetInputRect();
-    searchBar_.Paint(p, inputRect, inputText_, cursorVisible_, hasFocus());
+    searchBar_.Paint(p, inputRect, inputText_, preeditText_, cursorVisible_, hasFocus());
 
     // Layer 5: 结果列表
     resultList_.Paint(p, GetListRect());
@@ -92,6 +95,7 @@ void SearchWindow::paintEvent(QPaintEvent*) {
 
 void SearchWindow::showWithFadeIn() {
     inputText_.clear();
+    preeditText_.clear();
     resultList_.Clear();
     RebuildLayout();
 
@@ -107,6 +111,17 @@ void SearchWindow::showWithFadeIn() {
     activateWindow();
     setFocus();
 
+    // 弹出时强制英文输入模式（便于搜索文件名/命令），记录原状态供隐藏时恢复
+    if (HWND hwnd = reinterpret_cast<HWND>(winId())) {
+        if (HIMC himc = ImmGetContext(hwnd)) {
+            if (ImmGetConversionStatus(himc, &imeConversion_, &imeSentence_)) {
+                imeSaved_ = true;
+                ImmSetConversionStatus(himc, imeConversion_ & ~IME_CMODE_NATIVE, imeSentence_);
+            }
+            ImmReleaseContext(hwnd, himc);
+        }
+    }
+
     auto* anim = new QPropertyAnimation(this, "windowOpacity", this);
     anim->setDuration(180);
     anim->setStartValue(0.0);
@@ -116,6 +131,18 @@ void SearchWindow::showWithFadeIn() {
 }
 
 void SearchWindow::hideWithFadeOut() {
+    // 恢复弹出前的 IME 输入模式（弹出时曾强制切英文）
+    if (imeSaved_) {
+        if (HWND hwnd = reinterpret_cast<HWND>(winId())) {
+            if (HIMC himc = ImmGetContext(hwnd)) {
+                ImmSetConversionStatus(himc, imeConversion_, imeSentence_);
+                ImmReleaseContext(hwnd, himc);
+            }
+        }
+        imeSaved_ = false;
+    }
+    preeditText_.clear();
+
     auto* anim = new QPropertyAnimation(this, "windowOpacity", this);
     anim->setDuration(150);
     anim->setStartValue(windowOpacity());
@@ -273,7 +300,7 @@ bool SearchWindow::nativeEvent(const QByteArray& /*type*/, void* message, long* 
 QVariant SearchWindow::inputMethodQuery(Qt::InputMethodQuery query) const {
     if (query == Qt::ImCursorRectangle) {
         const QFontMetrics fm(searchBar_.Font());
-        const int textW = fm.horizontalAdvance(inputText_);
+        const int textW = fm.horizontalAdvance(inputText_) + fm.horizontalAdvance(preeditText_);
         // 与 SearchBar::Paint 一致：box 左/上/下缩进 kPadH，右缩进 (40+iconSize) 为 iris 让位
         const int iconSize = kInputHeight - 2 * SearchBar::kPadH - 8;
         const QRect box = GetInputRect().adjusted(SearchBar::kPadH, SearchBar::kPadH,
@@ -285,6 +312,18 @@ QVariant SearchWindow::inputMethodQuery(Qt::InputMethodQuery query) const {
         return QRect(x, y, SearchBar::kCursorW, cursorH);
     }
     return QWidget::inputMethodQuery(query);
+}
+
+void SearchWindow::inputMethodEvent(QInputMethodEvent* e) {
+    // IME 提交文本（中文输入法选字后）：追加到输入框，与 keyPressEvent 的字符追加一致
+    if (!e->commitString().isEmpty()) {
+        inputText_ += e->commitString();
+        emit searchRequested(inputText_);
+    }
+    // 预编辑文本（拼音实时预览）；提交时 IME 会清空 preeditString → preeditText_ 自动清空
+    preeditText_ = e->preeditString();
+    e->accept();
+    update();
 }
 
 } // namespace iris

@@ -8,6 +8,7 @@
 
 #include <filesystem>
 #include <memory>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -60,6 +61,13 @@ void OpenItem(const ResultItem& item) {
 } // namespace
 
 int main(int argc, char* argv[]) {
+    // ── 解析 --minimized：开机自启时静默启动（仅托盘，不弹搜索窗）──
+    const bool minimized = [&] {
+        for (int i = 1; i < argc; ++i)
+            if (std::string_view(argv[i]) == "--minimized") return true;
+        return false;
+    }();
+
     // ── 单实例：已有实例运行时，通知其显示窗口后立即退出，不另起进程 ──
     static constexpr const wchar_t* kMutexName = L"Local\\IrisSingleInstance";
     static constexpr const wchar_t* kShowEvent = L"Local\\IrisShowWindow";
@@ -90,6 +98,9 @@ int main(int argc, char* argv[]) {
     if (!std::filesystem::exists(Config::Instance().GetConfigPath())) {
         Config::Instance().Save();  // 首次启动生成默认 config.json
     }
+    // 开机自启：以 config 为权威源同步注册表 Run 键
+    // （autoStart=true 时写入带 --minimized 的命令行，开机静默启动）
+    iris::WinUtil::SetAutoStart(cfg.autoStart);
 
     // ── 三个数据源（按 config.providers 开关条件创建；Initialize 后台并行执行）──
     auto file     = cfg.providers.file.enabled     ? std::make_shared<FileProvider>()     : nullptr;
@@ -149,6 +160,7 @@ int main(int argc, char* argv[]) {
     // 系统托盘：后台运行入口 + 右键菜单
     TrayIcon tray;
     const bool trayOk = tray.Create();
+    tray.SetAutoStartChecked(cfg.autoStart);  // “开机自启”勾选态随 config 初始化
     QObject::connect(&tray, &TrayIcon::searchRequested, &w, [&w]() {
         w.showWithFadeIn();
     });
@@ -168,7 +180,7 @@ int main(int argc, char* argv[]) {
     QObject::connect(&tray, &TrayIcon::aboutRequested, [&w]() {
         w.SetSuppressAutoHide(true);   // 对话框夺焦期间阻止自动隐藏，避免模态恢复崩溃
         QMessageBox::information(nullptr, QString::fromUtf8("关于 Iris"),
-            QString::fromUtf8("Iris v1.0.0\n超级启动器\n"
+            QString::fromUtf8("Iris v1.0.1\n超级启动器\n"
                               "能帮你秒开软件，还能搜文件和网络收藏夹哦！\n"
                               "Author:AomeNero eMail:yotianya@gmail.com\n\n"));
         // 对话框关闭后主动夺回焦点（Qt::Tool 窗口不会自动重新获焦，否则卡住）
@@ -178,8 +190,19 @@ int main(int argc, char* argv[]) {
         w.SetSuppressAutoHide(false);
     });
     QObject::connect(&tray, &TrayIcon::quitRequested, &app, &QApplication::quit);
+    // 开机自启开关：即时更新 config + 注册表（config 为权威源）
+    QObject::connect(&tray, &TrayIcon::autoStartToggled, [](bool on) {
+        auto cur = Config::Instance().Get();
+        cur.autoStart = on;
+        Config::Instance().Set(cur);
+        Config::Instance().Save();
+        iris::WinUtil::SetAutoStart(on);
+    });
 
-    w.showWithFadeIn();  // 窗口先于索引显示（输入框为空 → 列表不显示，仅输入框）
+    if (!minimized) {
+        w.showWithFadeIn();  // 窗口先于索引显示（输入框为空 → 列表不显示，仅输入框）
+    }
+    // --minimized（开机自启）：仅托盘驻留，不弹搜索窗，按热键才唤出
 
     if (!trayOk) {
         w.SetSuppressAutoHide(true);

@@ -87,9 +87,12 @@ bool SetAutoStart(bool enable) {
     if (enable) {
         WCHAR exePath[MAX_PATH] = {};
         GetModuleFileNameW(nullptr, exePath, MAX_PATH);
-        const DWORD bytes = static_cast<DWORD>((wcslen(exePath) + 1) * sizeof(WCHAR));
+        // Run 键 REG_SZ：路径用双引号包裹（便携式部署路径常含空格），
+        // 追加 --minimized，让开机自启时静默启动（仅托盘，不弹搜索窗）
+        std::wstring cmd = std::wstring(L"\"") + exePath + L"\" --minimized";
+        const DWORD bytes = static_cast<DWORD>((cmd.size() + 1) * sizeof(WCHAR));
         ok = RegSetValueExW(hKey, kRunName, 0, REG_SZ,
-                            reinterpret_cast<BYTE*>(exePath), bytes) == ERROR_SUCCESS;
+                            reinterpret_cast<BYTE*>(cmd.data()), bytes) == ERROR_SUCCESS;
     } else {
         RegDeleteValueW(hKey, kRunName);
     }
