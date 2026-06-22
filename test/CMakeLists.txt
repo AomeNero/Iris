@@ -108,10 +108,11 @@ add_iris_test(test_bookmark_provider
     ${SRC}/provider/BookmarkProvider.cpp
     ${SRC}/provider/IProvider.h
     ${SRC}/provider/ISearchableProvider.h
+    ${SRC}/core/PinyinUtil.cpp
     ${SRC}/core/StringUtil.cpp
     ${SRC}/core/Logger.cpp
     ${SRC}/core/WinUtil.cpp
-    LINK shell32 ole32 oleaut32 advapi32 user32)
+    LINK cpp-pinyin shell32 ole32 oleaut32 advapi32 user32)
 
 # ---- 模块 6c：AppProvider（去重逻辑；.lnk/COM 解析留端到端）----
 add_iris_test(test_app_provider
@@ -120,10 +121,11 @@ add_iris_test(test_app_provider
     ${SRC}/provider/AppProvider.cpp
     ${SRC}/provider/IProvider.h
     ${SRC}/provider/ISearchableProvider.h
+    ${SRC}/core/PinyinUtil.cpp
     ${SRC}/core/StringUtil.cpp
     ${SRC}/core/Logger.cpp
     ${SRC}/core/WinUtil.cpp
-    LINK shell32 ole32 oleaut32 advapi32 user32)
+    LINK cpp-pinyin shell32 ole32 oleaut32 advapi32 user32)
 
 # ---- hotkey：字符串 ↔ (modifiers, vkCode) ----
 add_iris_test(test_hotkey

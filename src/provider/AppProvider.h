@@ -26,6 +26,8 @@ public:
     struct Entry {
         std::wstring title;       // 应用名（.lnk 文件名去扩展名）
         std::wstring targetPath;  // 快捷方式目标 exe 路径（打开用）
+        std::wstring pinyinFull;      // title 的无音调全拼（拼音匹配用，Rebuild 预计算）
+        std::wstring pinyinInitials;  // title 的首字母
     };
 
     AppProvider();
@@ -44,6 +46,8 @@ public:
     size_t FindFirstPrefix(std::wstring_view prefix) const override;
     ResultItem BuildResultItem(size_t index) const override;
     std::wstring GetSearchText(size_t index) const override;
+    std::wstring GetPinyinFull(size_t index) const override;
+    std::wstring GetPinyinInitials(size_t index) const override;
     ItemType GetType(size_t index) const override;
     uint8_t GetPathDepth(size_t index) const override;
 

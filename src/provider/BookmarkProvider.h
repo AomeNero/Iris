@@ -30,6 +30,8 @@ public:
         std::wstring url;       // 完整 URL（打开用）
         uint8_t     depth = 0;  // 文件夹嵌套深度
         bool        isEdge = false;  // 来源浏览器：false=Chrome, true=Edge
+        std::wstring pinyinFull;      // title 的无音调全拼（拼音匹配用，Rebuild 预计算）
+        std::wstring pinyinInitials;  // title 的首字母
     };
 
     // 解析单个 Bookmarks JSON 文本（UTF-8），收集条目（未排序）。供 Rebuild 与测试共用。
@@ -52,6 +54,8 @@ public:
     size_t FindFirstPrefix(std::wstring_view prefix) const override;
     ResultItem BuildResultItem(size_t index) const override;
     std::wstring GetSearchText(size_t index) const override;
+    std::wstring GetPinyinFull(size_t index) const override;
+    std::wstring GetPinyinInitials(size_t index) const override;
     ItemType GetType(size_t index) const override;
     uint8_t GetPathDepth(size_t index) const override;
 

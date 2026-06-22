@@ -45,6 +45,12 @@ target_compile_definitions(sqlite3 PRIVATE
     SQLITE_THREADSAFE=1 SQLITE_OMIT_LOAD_EXTENSION SQLITE_DEFAULT_WAL_SYNCHRONOUS=1)
 target_compile_options(sqlite3 PRIVATE /W0)
 
+# ---- cpp-pinyin（拼音搜索；静态链接，继承 Iris 全局 /MT CRT）----
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "cpp-pinyin static" FORCE)
+set(CPP_PINYIN_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(CPP_PINYIN_INSTALL OFF CACHE BOOL "" FORCE)
+add_subdirectory(third_party/cpp-pinyin)
+
 # ---- Iris 可执行文件（全部 src/ 直接编译进 exe；GUI 子系统）----
 file(GLOB_RECURSE IRIS_SOURCES CONFIGURE_DEPENDS
     ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp
@@ -60,7 +66,7 @@ target_compile_options(Iris PRIVATE /W4
 target_link_libraries(Iris PRIVATE
     Qt5::Core Qt5::Gui Qt5::Widgets Qt5::Svg Qt5::WinExtras
     Qt5::WinMain                              # Qt5 静态 WIN32 子系统的 WinMain
-    nlohmann_json sqlite3
+    nlohmann_json sqlite3 cpp-pinyin
     advapi32 shell32 ole32 oleaut32 user32 gdi32 imm32)
 # 静态 Qt5：排除 QTiffPlugin（其依赖 Qt5::Zlib 在本静态 Qt 安装中缺失）
 qt5_import_plugins(Iris EXCLUDE Qt5::QTiffPlugin)

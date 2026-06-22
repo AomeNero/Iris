@@ -17,6 +17,8 @@ public:
         std::wstring  path;
         iris::ItemType type = iris::ItemType::FILE;
         uint8_t       depth = 0;
+        std::wstring  pinyinFull;
+        std::wstring  pinyinInitials;
     };
     using Entries = std::vector<Entry>;
 
@@ -63,6 +65,8 @@ public:
     std::wstring GetSearchText(size_t i) const override {
         return entries_[i].title + L" " + entries_[i].path;
     }
+    std::wstring GetPinyinFull(size_t i) const override { return entries_[i].pinyinFull; }
+    std::wstring GetPinyinInitials(size_t i) const override { return entries_[i].pinyinInitials; }
     iris::ItemType GetType(size_t i) const override { return entries_[i].type; }
     uint8_t GetPathDepth(size_t i) const override { return entries_[i].depth; }
 

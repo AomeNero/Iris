@@ -26,10 +26,12 @@ public:
                                    const ParsedQuery& query,
                                    const std::atomic<bool>& cancelled);
 
-    /// 对单条目打分（公开便于单测）
+    /// 对单条目打分（公开便于单测）。pinyinFull/Initials 用于拼音匹配（App/Bookmark）。
     int MatchSingle(std::wstring_view title,
                     std::wstring_view subtitle,
                     std::wstring_view path,
+                    std::wstring_view pinyinFull,
+                    std::wstring_view pinyinInitials,
                     const std::vector<std::wstring>& keywords);
 };
 

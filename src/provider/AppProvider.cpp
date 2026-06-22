@@ -9,6 +9,7 @@
 #include <utility>
 
 #include "core/Logger.h"
+#include "core/PinyinUtil.h"
 #include "core/StringUtil.h"
 #include "core/WinUtil.h"
 
@@ -88,6 +89,12 @@ bool AppProvider::Rebuild() {
               [](const Entry& a, const Entry& b) {
                   return _wcsicmp(a.title.c_str(), b.title.c_str()) < 0;
               });
+
+    // 预计算拼音（拼音匹配用；App 条目少，瞬间完成）
+    for (auto& e : entries) {
+        e.pinyinFull = PinyinUtil::ToFull(e.title);
+        e.pinyinInitials = PinyinUtil::ToInitials(e.title);
+    }
 
     IRIS_LOG_INFO(L"AppProvider: 索引完成，应用数=" + std::to_wstring(entries.size()));
 
@@ -200,6 +207,16 @@ std::wstring AppProvider::GetSearchText(size_t index) const {
     if (!e || index >= e->size()) return {};
     const Entry& en = (*e)[index];
     return en.title + L" " + en.targetPath;
+}
+
+std::wstring AppProvider::GetPinyinFull(size_t index) const {
+    const auto e = Snapshot();
+    return (e && index < e->size()) ? (*e)[index].pinyinFull : std::wstring{};
+}
+
+std::wstring AppProvider::GetPinyinInitials(size_t index) const {
+    const auto e = Snapshot();
+    return (e && index < e->size()) ? (*e)[index].pinyinInitials : std::wstring{};
 }
 
 ItemType AppProvider::GetType(size_t /*index*/) const {

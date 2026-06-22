@@ -5,4 +5,11 @@
         <file>enter.png</file>
         <file>ctrl.png</file>
     </qresource>
+    <qresource prefix="/pinyin_dict">
+        <file alias="mandarin/word.txt">../third_party/cpp-pinyin/res/dict/mandarin/word.txt</file>
+        <file alias="mandarin/phrases_dict.txt">../third_party/cpp-pinyin/res/dict/mandarin/phrases_dict.txt</file>
+        <file alias="mandarin/phrases_map.txt">../third_party/cpp-pinyin/res/dict/mandarin/phrases_map.txt</file>
+        <file alias="mandarin/trans_word.txt">../third_party/cpp-pinyin/res/dict/mandarin/trans_word.txt</file>
+        <file alias="mandarin/user_dict.txt">../third_party/cpp-pinyin/res/dict/mandarin/user_dict.txt</file>
+    </qresource>
 </RCC>

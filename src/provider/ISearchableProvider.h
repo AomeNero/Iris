@@ -28,6 +28,10 @@ public:
     /// 获取搜索文本（按需拼接 title + path，不预存）
     virtual std::wstring GetSearchText(size_t index) const = 0;
 
+    /// 拼音（无音调全拼/首字母，拼音匹配用）。默认空——FileProvider 用默认，App/Bookmark override。
+    virtual std::wstring GetPinyinFull(size_t /*index*/) const { return {}; }
+    virtual std::wstring GetPinyinInitials(size_t /*index*/) const { return {}; }
+
     /// 元数据访问（Ranker 排序时按需调用）
     virtual ItemType GetType(size_t index) const = 0;
     virtual uint8_t  GetPathDepth(size_t index) const = 0;

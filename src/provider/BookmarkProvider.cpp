@@ -11,6 +11,7 @@
 #include <nlohmann/json.hpp>
 
 #include "core/Logger.h"
+#include "core/PinyinUtil.h"
 #include "core/StringUtil.h"
 #include "core/WinUtil.h"
 
@@ -137,6 +138,12 @@ bool BookmarkProvider::Rebuild() {
                   return _wcsicmp(a.title.c_str(), b.title.c_str()) < 0;
               });
 
+    // 预计算拼音（拼音匹配用）
+    for (auto& e : entries) {
+        e.pinyinFull = PinyinUtil::ToFull(e.title);
+        e.pinyinInitials = PinyinUtil::ToInitials(e.title);
+    }
+
     const size_t count = entries.size();
     ReplaceEntries(std::make_shared<const std::vector<Entry>>(std::move(entries)));
     IRIS_LOG_INFO(L"BookmarkProvider: 索引完成，书签数=" + std::to_wstring(count));
@@ -215,6 +222,16 @@ std::wstring BookmarkProvider::GetSearchText(size_t index) const {
     if (!e || index >= e->size()) return {};
     const Entry& en = (*e)[index];
     return en.title + L" " + en.url;
+}
+
+std::wstring BookmarkProvider::GetPinyinFull(size_t index) const {
+    const auto e = Snapshot();
+    return (e && index < e->size()) ? (*e)[index].pinyinFull : std::wstring{};
+}
+
+std::wstring BookmarkProvider::GetPinyinInitials(size_t index) const {
+    const auto e = Snapshot();
+    return (e && index < e->size()) ? (*e)[index].pinyinInitials : std::wstring{};
 }
 
 ItemType BookmarkProvider::GetType(size_t index) const {

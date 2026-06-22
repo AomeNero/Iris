@@ -27,6 +27,7 @@
 #include "core/HotkeySpec.h"
 #include "core/HistoryStore.h"
 #include "core/Logger.h"
+#include "core/PinyinUtil.h"
 #include "core/WinUtil.h"
 #include "ui/SearchWindow.h"
 #include "ui/TrayIcon.h"
@@ -101,6 +102,12 @@ int main(int argc, char* argv[]) {
     // 开机自启：以 config 为权威源同步注册表 Run 键
     // （autoStart=true 时写入带 --minimized 的命令行，开机静默启动）
     iris::WinUtil::SetAutoStart(cfg.autoStart);
+
+    // ── 拼音搜索：释放内置 dict 到 exe 同级 dict/ 并初始化 cpp-pinyin
+    //    （须在 App/Bookmark Provider 的 Rebuild 预计算拼音之前完成）
+    if (!iris::PinyinUtil::Init(exeDir.wstring())) {
+        IRIS_LOG_WARN(L"PinyinUtil::Init 失败，拼音搜索不可用（基础搜索不受影响）");
+    }
 
     // ── 三个数据源（按 config.providers 开关条件创建；Initialize 后台并行执行）──
     auto file     = cfg.providers.file.enabled     ? std::make_shared<FileProvider>()     : nullptr;

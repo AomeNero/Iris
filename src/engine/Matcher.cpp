@@ -36,10 +36,27 @@ bool PathSegmentStartsCI(std::wstring_view path, std::wstring_view kw) {
     return false;
 }
 
+// keyword 是否全 ASCII（拼音匹配只对 ASCII keyword 有意义）
+bool IsAscii(std::wstring_view s) {
+    for (wchar_t c : s)
+        if (static_cast<unsigned>(c) > 127) return false;
+    return true;
+}
+
+// 拼音匹配分数：全拼前缀 9 / 首字母前缀 7 / 全拼包含 5；不匹配 0。
+// full/initials 为空（如 FileProvider）则不命中。
+int PinyinScore(std::wstring_view full, std::wstring_view initials, std::wstring_view kw) {
+    if (!full.empty() && StartsWithCI(full, kw)) return 9;
+    if (!initials.empty() && StartsWithCI(initials, kw)) return 7;
+    if (!full.empty() && ContainsCI(full, kw)) return 5;
+    return 0;
+}
+
 } // namespace
 
 int Matcher::MatchSingle(std::wstring_view title, std::wstring_view subtitle,
                          std::wstring_view path,
+                         std::wstring_view pinyinFull, std::wstring_view pinyinInitials,
                          const std::vector<std::wstring>& keywords) {
     if (keywords.empty()) return 1;  // 仅类型过滤：全部纳入，由 Ranker 排序
 
@@ -56,8 +73,11 @@ int Matcher::MatchSingle(std::wstring_view title, std::wstring_view subtitle,
             positionScore += 7; ++matched;
         } else if (ContainsCI(path, kw)) {
             positionScore += 5; ++matched;
+        } else if (IsAscii(kw)) {
+            // 拼音匹配（App/Bookmark 预计算了拼音；File 返回空 → PinyinScore=0 不命中）
+            const int ps = PinyinScore(pinyinFull, pinyinInitials, kw);
+            if (ps > 0) { positionScore += ps; ++matched; }
         }
-        // 首字母/拼音 (P3) 暂不实现
     }
 
     // 任一关键词未命中 → 该条目 0 分
@@ -88,14 +108,19 @@ std::vector<MatchResult> Matcher::Match(ISearchableProvider& provider,
             return results;
 
         const ResultItem item = provider.BuildResultItem(idx);
-        const int score = MatchSingle(item.title, item.subtitle, item.path, query.keywords);
+        const int score = MatchSingle(item.title, item.subtitle, item.path,
+                                      provider.GetPinyinFull(idx),
+                                      provider.GetPinyinInitials(idx),
+                                      query.keywords);
         if (score > 0) {
             MatchResult mr;
             mr.provider = &provider;
             mr.entryIndex = idx;
             mr.rawScore = score;
             results.push_back(mr);
-            lastWasPrefixHit = true;
+            // 仅 title 前缀命中才延续前缀扫描区；拼音/包含命中不算——中文拼音命中散布在
+            // 非前缀区，若记为前缀命中，离开前缀区时会误 break，错过后续拼音命中条目。
+            lastWasPrefixHit = StartsWithCI(item.title, query.keywords[0]);
         } else if (prefixScan) {
             // 前缀扫描区间：一旦越过前缀命中区且连续未命中，可提前结束
             if (lastWasPrefixHit) {
