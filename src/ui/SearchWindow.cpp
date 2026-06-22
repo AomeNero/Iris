@@ -15,6 +15,10 @@
 #include <QPropertyAnimation>
 #include <QInputMethodEvent>
 #include <QApplication>
+#include <QAction>
+#include <QClipboard>
+#include <QMenu>
+#include <QContextMenuEvent>
 #include <QRect>
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -22,6 +26,7 @@
 #endif
 #include <windows.h>
 #include <windowsx.h>
+#include <shellapi.h>  // ShellExecuteExW / SHELLEXECUTEINFO（属性对话框）
 #include <imm.h>           // Imm* 输入法状态（弹出强制英文 / 隐藏恢复）
 
 namespace iris {
@@ -324,6 +329,47 @@ void SearchWindow::inputMethodEvent(QInputMethodEvent* e) {
     preeditText_ = e->preeditString();
     e->accept();
     update();
+}
+
+void SearchWindow::contextMenuEvent(QContextMenuEvent* event) {
+    const int y = event->pos().y() - kShadowMargin;
+    if (y < kInputHeight) return;  // 右键在输入框/阴影区：不弹菜单
+    resultList_.SelectByY(y - kInputHeight);  // 右键行变选中（仿资源管理器）
+
+    const ResultItem* item = resultList_.GetSelected();
+    if (!item) return;
+
+    QMenu menu(this);
+    const bool isUrl = (item->type == ItemType::BOOKMARK);  // URL 无"打开路径/属性"
+    QAction* aOpen     = menu.addAction(QString::fromUtf8("打开(&O)"));
+    QAction* aOpenPath = isUrl ? nullptr : menu.addAction(QString::fromUtf8("打开路径(&P)"));
+    QAction* aCopy     = menu.addAction(QString::fromUtf8("复制路径和文件名(&C)"));
+    QAction* aProps    = isUrl ? nullptr : menu.addAction(QString::fromUtf8("属性(&R)"));
+
+    SetSuppressAutoHide(true);  // 菜单夺焦期间抑制失焦自动隐藏
+    QAction* sel = menu.exec(event->globalPos());
+    SetSuppressAutoHide(false);
+    if (!sel) return;
+
+    const std::wstring& path = item->path;  // FILE=文件；APP=目标 exe；BOOKMARK=URL
+    if (sel == aOpen) {
+        emit itemActivated(*item);  // 复用左键/Enter：main 打开 + 记历史
+        hideWithFadeOut();
+    } else if (sel == aCopy) {
+        QApplication::clipboard()->setText(QString::fromStdWString(path));
+    } else if (aOpenPath && sel == aOpenPath) {
+        // explorer /select,"path"：打开所在文件夹并选中
+        const std::wstring args = L"/select,\"" + path + L"\"";
+        ShellExecuteW(nullptr, L"open", L"explorer.exe", args.c_str(), nullptr, SW_SHOWNORMAL);
+    } else if (aProps && sel == aProps) {
+        SHELLEXECUTEINFOW sei{};  // 文件属性对话框
+        sei.cbSize = sizeof(sei);
+        sei.fMask = SEE_MASK_INVOKEIDLIST;
+        sei.lpVerb = L"properties";
+        sei.lpFile = path.c_str();
+        sei.nShow = SW_SHOWNORMAL;
+        ShellExecuteExW(&sei);
+    }
 }
 
 } // namespace iris

@@ -15,6 +15,7 @@
 
 class QPropertyAnimation;
 class QInputMethodEvent;
+class QContextMenuEvent;
 
 namespace iris {
 
@@ -49,6 +50,7 @@ protected:
     bool nativeEvent(const QByteArray& eventType, void* message, long* result) override;
     QVariant inputMethodQuery(Qt::InputMethodQuery query) const override;
     void inputMethodEvent(QInputMethodEvent* event) override;  // 接收 IME 提交文本，支持中文输入
+    void contextMenuEvent(QContextMenuEvent* event) override;  // 结果项右键菜单（打开/打开路径/复制/属性）
 
 private:
     void RebuildLayout();
