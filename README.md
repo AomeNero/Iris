@@ -3,7 +3,7 @@
 > Windows 极速桌面启动器——快捷键秒搜文件、应用与书签。
 
 ![CI](https://img.shields.io/github/actions/workflow/status/AomeNero/Iris/ci.yml?branch=main&label=CI&logo=github)
-![Tests](https://img.shields.io/badge/tests-41%20passed-brightgreen?logo=googletest)
+![Tests](https://img.shields.io/badge/tests-45%20passed-brightgreen?logo=googletest)
 ![Coverage](https://img.shields.io/badge/coverage-≥80%25-green)
 ![Version](https://img.shields.io/github/v/release/AomeNero/Iris?label=release&logo=iris)
 ![Platform](https://img.shields.io/badge/platform-Windows%2010%2B-0078D4?logo=windows)
@@ -27,7 +27,8 @@ Windows 自带的搜索慢且入口分散——找文件要去资源管理器、
 - **快捷键秒唤**：全局热键（默认 `Alt+Space`）瞬间弹出搜索框，输入即搜、即开。
 - **极速索引**：直接读取 NTFS USN Journal / MFT，全盘文件毫秒级检索，非 NTFS 自动回退递归扫描。
 - **三源合一**：本地文件、开始菜单应用、Chrome/Edge 浏览器书签统一排序，按使用频次加权。
-- **键鼠并捷**：`Ctrl+1~9` 快捷打开对应行、回车/双击执行、上下键选择、滚轮翻页。
+- **拼音搜索**：输入拼音直接命中中文（如 `weixin` 找「微信」），全拼 + 首字母，中英混搜无障碍。
+- **键鼠并捷**：`Ctrl+1~9` 快捷打开对应行、回车/双击执行、上下键选择、`←/→/PageUp/Down` 分页翻页、鼠标侧键翻页、滚轮浏览、右键菜单（打开/打开路径/复制/属性）。
 - **优雅便携**：QPainter 自绘 Alfred 风格界面，明/暗主题随心切换；单文件免安装、托盘驻留、低内存占用。
 
 ### 视觉演示
@@ -82,7 +83,7 @@ scripts\build.cmd                                     # 增量构建 Release
 | `hotkey` | string | `"Alt+Space"` | 全局热键，格式 `Mod[+Mod]+Key`（如 `Ctrl+Alt+P`） |
 | `theme` | string | `"light"` | 主题：`"light"` / `"dark"` |
 | `maxResults` | int | `9` | 结果列表最大显示行数（1–9） |
-| `autoStart` | bool | `true` | 开机自启（预留） |
+| `autoStart` | bool | `true` | 开机自启（注册表 Run 键，托盘可切换） |
 | `excludeHidden` | bool | `true` | 索引时排除隐藏文件 |
 | `excludeSystem` | bool | `true` | 索引时排除系统文件 |
 | `providers.file.enabled` | bool | `true` | 启用文件搜索（NTFS USN） |
@@ -100,7 +101,7 @@ scripts\build.cmd                                     # 增量构建 Release
 欢迎 Issue 与 PR！请遵循 [`CONTRIBUTING.md`](CONTRIBUTING.md) 的规范：
 
 - **Issue**：Bug 报告请附复现步骤与 `Iris.exe` 同级 `log/iris_*.log`；功能建议请描述使用场景。
-- **PR**：须通过全部 `ctest`（当前 41 项），提交信息遵循 [约定式提交](https://www.conventionalcommits.org/zh-hans/)（`feat:` / `fix:` / `docs:` …），改动聚焦、不夹带无关重构。
+- **PR**：须通过全部 `ctest`（当前 45 项），提交信息遵循 [约定式提交](https://www.conventionalcommits.org/zh-hans/)（`feat:` / `fix:` / `docs:` …），改动聚焦、不夹带无关重构。
 
 ### 本地开发
 

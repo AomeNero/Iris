@@ -15,7 +15,6 @@
 
 class QPropertyAnimation;
 class QInputMethodEvent;
-class QContextMenuEvent;
 
 namespace iris {
 
@@ -50,7 +49,7 @@ protected:
     bool nativeEvent(const QByteArray& eventType, void* message, long* result) override;
     QVariant inputMethodQuery(Qt::InputMethodQuery query) const override;
     void inputMethodEvent(QInputMethodEvent* event) override;  // 接收 IME 提交文本，支持中文输入
-    void contextMenuEvent(QContextMenuEvent* event) override;  // 结果项右键菜单（打开/打开路径/复制/属性）
+    void contextMenuEvent(QContextMenuEvent* event) override;  // 结果项右键菜单
 
 private:
     void RebuildLayout();
@@ -67,10 +66,6 @@ private:
     QTimer  cursorTimer_;
     bool    cursorVisible_ = true;
     bool    suppressAutoHide_ = false;  // 弹模态对话框期间抑制失焦自动隐藏
-    // IME 状态：弹出时强制英文输入模式，隐藏时恢复原模式
-    bool          imeSaved_      = false;
-    unsigned long imeConversion_ = 0;
-    unsigned long imeSentence_   = 0;
 
     static constexpr int kWindowWidth  = 1440;
     static constexpr int kInputHeight   = SearchBar::kHeight;   // 100

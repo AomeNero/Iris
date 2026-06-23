@@ -163,9 +163,11 @@ void ResultListView::EnsureBounds() {
     if (results_.isEmpty()) { selectedIndex_ = 0; scrollOffset_ = 0; return; }
     if (selectedIndex_ < 0) selectedIndex_ = 0;
     if (selectedIndex_ >= results_.size()) selectedIndex_ = results_.size() - 1;
-    const int maxOff = results_.size() - VisibleCount();
+    // maxOff = 末页起始索引：允许末页不满 9 行（电子书式分页）。
+    // 原先 size-VisibleCount 强制末屏铺满，与分页跳转冲突。
+    const int lastPageStart = ((results_.size() - 1) / kMaxVisibleRows) * kMaxVisibleRows;
     if (scrollOffset_ < 0) scrollOffset_ = 0;
-    if (scrollOffset_ > maxOff) scrollOffset_ = maxOff;
+    if (scrollOffset_ > lastPageStart) scrollOffset_ = lastPageStart;
 }
 
 void ResultListView::EnsureSelectionVisible() {
@@ -194,9 +196,35 @@ void ResultListView::ScrollBy(int delta) {
     EnsureSelectionVisible();
 }
 
+int ResultListView::RowsThisPage() const {
+    // 当前 scrollOffset_ 下实际显示的行数：末页可能不足 9（与 VisibleCount 的"容量"区分）
+    if (results_.isEmpty()) return 0;
+    const int rem = static_cast<int>(results_.size()) - scrollOffset_;
+    return rem < kMaxVisibleRows ? rem : kMaxVisibleRows;
+}
+
+void ResultListView::PageUp() {
+    // 分页跳转：每页 kMaxVisibleRows 条，循环；选中回到新页首行（Ctrl+1 位）
+    if (results_.isEmpty()) return;
+    const int page = kMaxVisibleRows;
+    const int pages = (static_cast<int>(results_.size()) + page - 1) / page;  // ceil
+    const int newPage = (selectedIndex_ / page - 1 + pages) % pages;           // 循环到末页
+    selectedIndex_ = newPage * page;
+    scrollOffset_  = selectedIndex_;  // 页首对齐
+}
+
+void ResultListView::PageDown() {
+    if (results_.isEmpty()) return;
+    const int page = kMaxVisibleRows;
+    const int pages = (static_cast<int>(results_.size()) + page - 1) / page;
+    const int newPage = (selectedIndex_ / page + 1) % pages;  // 循环到首页
+    selectedIndex_ = newPage * page;
+    scrollOffset_  = selectedIndex_;
+}
+
 void ResultListView::SelectByY(int y) {
     if (results_.isEmpty()) return;
-    const int visible = VisibleCount();
+    const int visible = RowsThisPage();  // 末页可能不足 9 行
     int acc = 0;
     for (int vi = 0; vi < visible; ++vi) {
         const int idx = scrollOffset_ + vi;
@@ -211,7 +239,7 @@ void ResultListView::SelectByY(int y) {
 bool ResultListView::SetHoverByY(int y) {
     // 悬停即选中（与键盘上下选统一为单一选中状态）
     if (results_.isEmpty()) return false;
-    const int visible = VisibleCount();
+    const int visible = RowsThisPage();
     int acc = 0;
     int hit = scrollOffset_ + visible - 1;
     for (int vi = 0; vi < visible; ++vi) {
@@ -228,7 +256,7 @@ bool ResultListView::SetHoverByY(int y) {
 
 int ResultListView::CalculateHeight() const {
     if (results_.isEmpty()) return 0;  // 空列表不占位（窗口只保留输入框）
-    return VisibleCount() * kRowHSelected + 18;  // 末行与内容区底边留 18px
+    return RowsThisPage() * kRowHSelected + 18;  // 末页随实际行数缩短；末行与内容区底边留 18px
 }
 
 void ResultListView::DrawGlobe(QPainter& p, const QRect& r, const QColor& color) {
@@ -365,7 +393,8 @@ void ResultListView::DrawScrollBar(QPainter& p, const QRect& listRect) const {
     if (handleH < 28) handleH = 28;
     if (handleH > trackH) handleH = trackH;
 
-    const qreal pos = qreal(scrollOffset_) / qreal(range);
+    // 分页跳转时 scrollOffset_ 可达末页起始（>range），钳到 [0,1] 防止 thumb 越出轨道
+    const qreal pos = qBound(qreal(0), qreal(scrollOffset_) / qreal(range), qreal(1));
     const int handleY = trackTop + int((trackH - handleH) * pos);
 
     p.setPen(Qt::NoPen);
@@ -376,7 +405,7 @@ void ResultListView::DrawScrollBar(QPainter& p, const QRect& listRect) const {
 void ResultListView::Paint(QPainter& p, const QRect& listRect) {
     if (results_.isEmpty()) return;  // 空列表不绘制（输入框为空/无结果时窗口只保留输入框）
 
-    const int visible = VisibleCount();
+    const int visible = RowsThisPage();  // 末页可能不足 9 行
     const bool scrollable = results_.size() > kMaxVisibleRows;
 
     int y = listRect.top();

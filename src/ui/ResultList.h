@@ -27,6 +27,8 @@ public:
     void MoveSelectionUp();
     void MoveSelectionDown();
     void ScrollBy(int delta);              // 鼠标滚轮：移动选择并保持可见
+    void PageUp();                         // ←/PageUp：翻到上一页（循环），选中回页首
+    void PageDown();                       // →/PageDown：翻到下一页（循环），选中回页首
     void SelectByY(int yInList);           // 鼠标点击命中（相对列表顶部）
     bool SetHoverByY(int yInList);         // 鼠标悬停命中 → 直接选中该行；返回选中是否变化
 
@@ -50,7 +52,8 @@ private:
     void DrawShortcut(QPainter& p, const QRect& rowRect, int visibleNo);       // 常态行右侧 ctrl.png+N
     void DrawScrollBar(QPainter& p, const QRect& listRect) const;
 
-    int  VisibleCount() const { const int s = results_.size(); return s < kMaxVisibleRows ? s : kMaxVisibleRows; }
+    int  VisibleCount() const { const int s = results_.size(); return s < kMaxVisibleRows ? s : kMaxVisibleRows; }  // 视窗容量（恒 9 或 size）
+    int  RowsThisPage() const;             // 当前 scrollOffset_ 下实际显示行数（末页可能不足 9）
     int  VisibleRowHeight(int idx) const { return (idx == selectedIndex_) ? kRowHSelected : kRowHNormal; }
     void EnsureBounds();
     void EnsureSelectionVisible();

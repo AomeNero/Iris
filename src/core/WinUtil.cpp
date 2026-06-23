@@ -138,4 +138,20 @@ bool EnsureDirectory(const std::wstring& path) {
     return !ec;
 }
 
+void RevealInExplorer(const std::wstring& path) {
+    // explorer /select,"path"：打开父目录并选中该文件（path 含空格靠引号保护）
+    const std::wstring params = L"/select,\"" + path + L"\"";
+    ShellExecuteW(nullptr, L"open", L"explorer.exe", params.c_str(), nullptr, SW_SHOWNORMAL);
+}
+
+void ShowProperties(const std::wstring& path) {
+    SHELLEXECUTEINFOW sei = {};
+    sei.cbSize = sizeof(sei);
+    sei.fMask = SEE_MASK_INVOKEIDLIST;  // 使 lpVerb="properties" 生效
+    sei.lpVerb = L"properties";
+    sei.lpFile = path.c_str();
+    sei.nShow = SW_SHOWNORMAL;
+    ShellExecuteExW(&sei);
+}
+
 } // namespace iris::WinUtil

@@ -187,7 +187,7 @@ int main(int argc, char* argv[]) {
     QObject::connect(&tray, &TrayIcon::aboutRequested, [&w]() {
         w.SetSuppressAutoHide(true);   // 对话框夺焦期间阻止自动隐藏，避免模态恢复崩溃
         QMessageBox::information(nullptr, QString::fromUtf8("关于 Iris"),
-            QString::fromUtf8("Iris v1.0.1\n超级启动器\n"
+            QString::fromUtf8("Iris v1.1.0\n超级启动器\n"
                               "能帮你秒开软件，还能搜文件和网络收藏夹哦！\n"
                               "Author:AomeNero eMail:yotianya@gmail.com\n\n"));
         // 对话框关闭后主动夺回焦点（Qt::Tool 窗口不会自动重新获焦，否则卡住）

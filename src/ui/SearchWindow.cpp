@@ -15,19 +15,22 @@
 #include <QPropertyAnimation>
 #include <QInputMethodEvent>
 #include <QApplication>
-#include <QAction>
 #include <QClipboard>
-#include <QMenu>
 #include <QContextMenuEvent>
 #include <QRect>
+
+#include "ui/ContextMenu.h"  // 右键结果菜单
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
 #include <windowsx.h>
-#include <shellapi.h>  // ShellExecuteExW / SHELLEXECUTEINFO（属性对话框）
-#include <imm.h>           // Imm* 输入法状态（弹出强制英文 / 隐藏恢复）
+
+namespace {
+// 右键菜单动作 id（与 ContextMenu::addItem 的 action 对应）
+enum ContextAction { ACT_OPEN = 1, ACT_REVEAL, ACT_COPY, ACT_PROPS };
+}
 
 namespace iris {
 
@@ -116,17 +119,6 @@ void SearchWindow::showWithFadeIn() {
     activateWindow();
     setFocus();
 
-    // 弹出时强制英文输入模式（便于搜索文件名/命令），记录原状态供隐藏时恢复
-    if (HWND hwnd = reinterpret_cast<HWND>(winId())) {
-        if (HIMC himc = ImmGetContext(hwnd)) {
-            if (ImmGetConversionStatus(himc, &imeConversion_, &imeSentence_)) {
-                imeSaved_ = true;
-                ImmSetConversionStatus(himc, imeConversion_ & ~IME_CMODE_NATIVE, imeSentence_);
-            }
-            ImmReleaseContext(hwnd, himc);
-        }
-    }
-
     auto* anim = new QPropertyAnimation(this, "windowOpacity", this);
     anim->setDuration(180);
     anim->setStartValue(0.0);
@@ -136,16 +128,6 @@ void SearchWindow::showWithFadeIn() {
 }
 
 void SearchWindow::hideWithFadeOut() {
-    // 恢复弹出前的 IME 输入模式（弹出时曾强制切英文）
-    if (imeSaved_) {
-        if (HWND hwnd = reinterpret_cast<HWND>(winId())) {
-            if (HIMC himc = ImmGetContext(hwnd)) {
-                ImmSetConversionStatus(himc, imeConversion_, imeSentence_);
-                ImmReleaseContext(hwnd, himc);
-            }
-        }
-        imeSaved_ = false;
-    }
     preeditText_.clear();
 
     auto* anim = new QPropertyAnimation(this, "windowOpacity", this);
@@ -202,6 +184,23 @@ void SearchWindow::keyPressEvent(QKeyEvent* event) {
             resultList_.MoveSelectionDown();
             update();
             return;
+        case Qt::Key_Left:
+        case Qt::Key_PageUp:
+            // 翻上一页：仅裸 ← / PageUp（排除 Alt/Ctrl/Shift/Meta；Alt+←已让位给鼠标侧键 XButton1）
+            if (event->modifiers() & (Qt::AltModifier | Qt::ControlModifier | Qt::ShiftModifier | Qt::MetaModifier))
+                break;
+            resultList_.PageUp();
+            RebuildLayout();  // 末页窗口高度可能变（随实际行数缩短）
+            update();
+            return;
+        case Qt::Key_Right:
+        case Qt::Key_PageDown:
+            if (event->modifiers() & (Qt::AltModifier | Qt::ControlModifier | Qt::ShiftModifier | Qt::MetaModifier))
+                break;
+            resultList_.PageDown();
+            RebuildLayout();
+            update();
+            return;
         case Qt::Key_1: case Qt::Key_2: case Qt::Key_3:
         case Qt::Key_4: case Qt::Key_5: case Qt::Key_6:
         case Qt::Key_7: case Qt::Key_8: case Qt::Key_9:
@@ -233,6 +232,19 @@ void SearchWindow::keyPressEvent(QKeyEvent* event) {
 }
 
 void SearchWindow::mousePressEvent(QMouseEvent* event) {
+    // 鼠标侧键翻页（整个窗口任意位置响应）
+    if (event->button() == Qt::BackButton) {       // XButton1 后退侧键 → 上一页
+        resultList_.PageUp();
+        RebuildLayout();
+        update();
+        return;
+    }
+    if (event->button() == Qt::ForwardButton) {    // XButton2 前进侧键 → 下一页
+        resultList_.PageDown();
+        RebuildLayout();
+        update();
+        return;
+    }
     if (event->button() != Qt::LeftButton) return;
     const int y = event->pos().y() - kShadowMargin;
     if (y >= kInputHeight) {
@@ -331,45 +343,47 @@ void SearchWindow::inputMethodEvent(QInputMethodEvent* e) {
     update();
 }
 
-void SearchWindow::contextMenuEvent(QContextMenuEvent* event) {
-    const int y = event->pos().y() - kShadowMargin;
-    if (y < kInputHeight) return;  // 右键在输入框/阴影区：不弹菜单
-    resultList_.SelectByY(y - kInputHeight);  // 右键行变选中（仿资源管理器）
-
+void SearchWindow::contextMenuEvent(QContextMenuEvent* e) {
+    const int y = e->pos().y() - kShadowMargin;
+    if (y < kInputHeight) return;  // 输入框区不弹菜单
+    resultList_.SelectByY(y - kInputHeight);  // 右键选中该行（资源管理器习惯）
     const ResultItem* item = resultList_.GetSelected();
     if (!item) return;
 
-    QMenu menu(this);
-    const bool isUrl = (item->type == ItemType::BOOKMARK);  // URL 无"打开路径/属性"
-    QAction* aOpen     = menu.addAction(QString::fromUtf8("打开(&O)"));
-    QAction* aOpenPath = isUrl ? nullptr : menu.addAction(QString::fromUtf8("打开路径(&P)"));
-    QAction* aCopy     = menu.addAction(QString::fromUtf8("复制路径和文件名(&C)"));
-    QAction* aProps    = isUrl ? nullptr : menu.addAction(QString::fromUtf8("属性(&R)"));
+    const ResultItem itemCopy = *item;  // 值捕获，防菜单期间结果刷新悬垂
+    SetSuppressAutoHide(true);  // 防弹菜单失焦触发 focusOut 自动隐藏（同"关于"对话框）
 
-    SetSuppressAutoHide(true);  // 菜单夺焦期间抑制失焦自动隐藏
-    QAction* sel = menu.exec(event->globalPos());
-    SetSuppressAutoHide(false);
-    if (!sel) return;
-
-    const std::wstring& path = item->path;  // FILE=文件；APP=目标 exe；BOOKMARK=URL
-    if (sel == aOpen) {
-        emit itemActivated(*item);  // 复用左键/Enter：main 打开 + 记历史
-        hideWithFadeOut();
-    } else if (sel == aCopy) {
-        QApplication::clipboard()->setText(QString::fromStdWString(path));
-    } else if (aOpenPath && sel == aOpenPath) {
-        // explorer /select,"path"：打开所在文件夹并选中
-        const std::wstring args = L"/select,\"" + path + L"\"";
-        ShellExecuteW(nullptr, L"open", L"explorer.exe", args.c_str(), nullptr, SW_SHOWNORMAL);
-    } else if (aProps && sel == aProps) {
-        SHELLEXECUTEINFOW sei{};  // 文件属性对话框
-        sei.cbSize = sizeof(sei);
-        sei.fMask = SEE_MASK_INVOKEIDLIST;
-        sei.lpVerb = L"properties";
-        sei.lpFile = path.c_str();
-        sei.nShow = SW_SHOWNORMAL;
-        ShellExecuteExW(&sei);
+    auto* menu = new ContextMenu(this);
+    menu->addItem(QString::fromUtf8("打开(O)"), QChar('O'), ACT_OPEN);
+    if (itemCopy.type != ItemType::BOOKMARK) {
+        menu->addItem(QString::fromUtf8("打开路径(P)"), QChar('P'), ACT_REVEAL);
+        menu->addItem(QString::fromUtf8("复制路径和文件名(C)"), QChar('C'), ACT_COPY);
+        menu->addItem(QString::fromUtf8("属性(R)"), QChar('R'), ACT_PROPS);
+    } else {
+        // BOOKMARK(URL) 无文件，无"打开路径"/"属性"
+        menu->addItem(QString::fromUtf8("复制路径和文件名(C)"), QChar('C'), ACT_COPY);
     }
+
+    connect(menu, &ContextMenu::triggered, this, [this, itemCopy](int action) {
+        switch (action) {
+            case ACT_OPEN:
+                OpenSelected();  // emit itemActivated + hideWithFadeOut
+                break;
+            case ACT_REVEAL:
+                WinUtil::RevealInExplorer(itemCopy.path);
+                hideWithFadeOut();
+                break;
+            case ACT_COPY:
+                QApplication::clipboard()->setText(QString::fromStdWString(itemCopy.path));
+                break;  // 复制后保留窗口（用户可能继续操作）
+            case ACT_PROPS:
+                WinUtil::ShowProperties(itemCopy.path);
+                break;  // 属性对话框显示，保留窗口
+        }
+    });
+    connect(menu, &ContextMenu::closed, this, [this]() { SetSuppressAutoHide(false); });
+
+    menu->popup(e->globalPos());
 }
 
 } // namespace iris

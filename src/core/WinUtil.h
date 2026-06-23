@@ -10,6 +10,7 @@
 #endif
 #include <windows.h>
 #include <shlobj.h>  // REFKNOWNFOLDERID, IShellLink
+#include <shellapi.h>  // ShellExecuteW / ShellExecuteExW（打开路径/属性）
 
 namespace iris::WinUtil {
 
@@ -36,6 +37,11 @@ ShortcutInfo ResolveShortcut(const std::wstring& lnkPath);
 /// 开机自启（写 HKCU\\...\\Run）。失败返回 false。
 bool SetAutoStart(bool enable);
 bool IsAutoStartEnabled();
+
+/// 资源管理器中定位并选中给定文件（explorer /select）。path 含空格靠引号保护。
+void RevealInExplorer(const std::wstring& path);
+/// 弹出 Windows 属性对话框（ShellExecuteEx properties）。
+void ShowProperties(const std::wstring& path);
 
 /// 已知文件夹路径（FOLDERID_RoamingAppData 等）
 std::wstring GetKnownFolderPath(REFKNOWNFOLDERID rfid);
