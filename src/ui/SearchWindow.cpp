@@ -106,6 +106,7 @@ void SearchWindow::showWithFadeIn() {
     inputText_.clear();
     preeditText_.clear();
     resultList_.Clear();
+    imeStateSaved_ = false;  // 每次弹出重新保存 IME 原状态
     RebuildLayout();
 
     // 居中到当前显示器
@@ -162,13 +163,17 @@ void SearchWindow::EnsureEnglishInput() {
         ITfCompartment* comp = nullptr;
         hr = compMgr->GetCompartment(GUID_COMPARTMENT_KEYBOARD_OPENCLOSE, &comp);
         if (SUCCEEDED(hr) && comp) {
-            // 先查询当前 IME 开关状态，保存用于 RestoreIme()
-            VARIANT curVar;
-            VariantInit(&curVar);
-            if (SUCCEEDED(comp->GetValue(&curVar)) && curVar.vt == VT_I4) {
-                imeWasOpen_ = (curVar.lVal != 0);
+            // 仅首次调用查询并保存 IME 原状态（可能被多次调用：
+            // showWithFadeIn timer + WM_IME_SETCONTEXT nativeEvent）
+            if (!imeStateSaved_) {
+                VARIANT curVar;
+                VariantInit(&curVar);
+                if (SUCCEEDED(comp->GetValue(&curVar)) && curVar.vt == VT_I4) {
+                    imeWasOpen_ = (curVar.lVal != 0);
+                }
+                VariantClear(&curVar);
+                imeStateSaved_ = true;
             }
-            VariantClear(&curVar);
 
             // 关闭 IME → 字母数字/英文模式
             VARIANT var;
@@ -211,7 +216,8 @@ void SearchWindow::RestoreIme() {
     }
     threadMgr->Release();
 
-    imeWasOpen_ = false;  // 重置，避免重复恢复
+    imeWasOpen_ = false;   // 重置，避免重复恢复
+    imeStateSaved_ = false; // 重置，下次弹出重新保存
 }
 
 void SearchWindow::onSearchFinished(const QVector<ResultItem>& results) {
@@ -384,6 +390,11 @@ bool SearchWindow::nativeEvent(const QByteArray& /*type*/, void* message, long* 
         if (x > wr.right - border)  { *result = HTRIGHT;  return true; }
         if (y < wr.top + border)    { *result = HTTOP;    return true; }
         if (y > wr.bottom - border) { *result = HTBOTTOM; return true; }
+    }
+    // IME 激活通知（首次启动或重获焦点时）：defer 关闭 IME 确保英文默认
+    // 仅靠 showWithFadeIn 中 timer 不够——首次启动时 timer 可能在 WM_IME_SETCONTEXT 前执行
+    if (msg->message == WM_IME_SETCONTEXT && msg->wParam) {
+        QTimer::singleShot(0, this, [this]() { EnsureEnglishInput(); });
     }
 #endif
     return false;

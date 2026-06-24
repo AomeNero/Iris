@@ -69,6 +69,7 @@ private:
     bool    cursorVisible_ = true;
     bool    suppressAutoHide_ = false;  // 弹模态对话框期间抑制失焦自动隐藏
     bool    imeWasOpen_ = false;         // 弹出前 IME 是否开启（隐藏时据此恢复）
+    bool    imeStateSaved_ = false;      // 防重入：EnsureEnglishInput 多次调用只保存首次
 
     static constexpr int kWindowWidth  = 1440;
     static constexpr int kInputHeight   = SearchBar::kHeight;   // 100
