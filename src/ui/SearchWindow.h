@@ -58,6 +58,7 @@ private:
     void OpenSelected();
     void OpenByVisibleNo(int visibleNo);  // Ctrl+1..9：打开第N可见行（对应右侧 ctrlN 提示）
     void EnsureEnglishInput();           // 弹出时关闭 TSF IME，默认英文输入
+    void QueryAndSaveImeState();         // setFocus 前保存系统 IME 原状态
     void RestoreIme();                   // 隐藏时恢复弹出前的 IME 状态
 
     SearchBar     searchBar_;

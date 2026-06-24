@@ -109,6 +109,10 @@ void SearchWindow::showWithFadeIn() {
     imeStateSaved_ = false;  // 每次弹出重新保存 IME 原状态
     RebuildLayout();
 
+    // 在 setFocus 之前保存系统当前 IME 状态——setFocus 会激活 IME，
+    // 激活过程可能自动打开 IME（英文→中文），污染原状态。
+    QueryAndSaveImeState();
+
     // 居中到当前显示器
     const RECT mr = WinUtil::GetCurrentMonitorRect();
     const int x = mr.left + (mr.right - mr.left - width()) / 2;
@@ -145,17 +149,16 @@ void SearchWindow::hideWithFadeOut() {
     anim->start(QAbstractAnimation::DeleteWhenStopped);
 }
 
-void SearchWindow::EnsureEnglishInput() {
-    // 通过 TSF 关闭 IME，使搜索框默认英文输入（用户 Shift 可切中文）
-    // ImmSetConversionStatus/ImmSetOpenStatus 对 TSF IME（微软拼音/搜狗）无效，
-    // 必须走 TSF COM 设 GUID_COMPARTMENT_KEYBOARD_OPENCLOSE = 0。
+void SearchWindow::QueryAndSaveImeState() {
+    if (imeStateSaved_) return;
+
     ITfThreadMgr* threadMgr = nullptr;
     HRESULT hr = CoCreateInstance(CLSID_TF_ThreadMgr, nullptr, CLSCTX_INPROC_SERVER,
                                    IID_ITfThreadMgr, (void**)&threadMgr);
     if (FAILED(hr) || !threadMgr) return;
 
     TfClientId clientId = 0;
-    threadMgr->Activate(&clientId);  // 已激活时返回 S_FALSE，无害
+    threadMgr->Activate(&clientId);
 
     ITfCompartmentMgr* compMgr = nullptr;
     hr = threadMgr->QueryInterface(IID_ITfCompartmentMgr, (void**)&compMgr);
@@ -163,23 +166,43 @@ void SearchWindow::EnsureEnglishInput() {
         ITfCompartment* comp = nullptr;
         hr = compMgr->GetCompartment(GUID_COMPARTMENT_KEYBOARD_OPENCLOSE, &comp);
         if (SUCCEEDED(hr) && comp) {
-            // 仅首次调用查询并保存 IME 原状态（可能被多次调用：
-            // showWithFadeIn timer + WM_IME_SETCONTEXT nativeEvent）
-            if (!imeStateSaved_) {
-                VARIANT curVar;
-                VariantInit(&curVar);
-                if (SUCCEEDED(comp->GetValue(&curVar)) && curVar.vt == VT_I4) {
-                    imeWasOpen_ = (curVar.lVal != 0);
-                }
-                VariantClear(&curVar);
-                imeStateSaved_ = true;
+            VARIANT var;
+            VariantInit(&var);
+            if (SUCCEEDED(comp->GetValue(&var)) && var.vt == VT_I4) {
+                imeWasOpen_ = (var.lVal != 0);
             }
+            VariantClear(&var);
+            comp->Release();
+        }
+        compMgr->Release();
+    }
+    threadMgr->Release();
 
-            // 关闭 IME → 字母数字/英文模式
+    imeStateSaved_ = true;
+}
+
+void SearchWindow::EnsureEnglishInput() {
+    // 通过 TSF 关闭 IME，使搜索框默认英文输入（用户 Shift 可切中文）
+    // ImmSetConversionStatus/ImmSetOpenStatus 对 TSF IME 无效，必须走 TSF COM。
+    // 状态保存由 QueryAndSaveImeState() 在 setFocus 前完成，此处仅关闭。
+    ITfThreadMgr* threadMgr = nullptr;
+    HRESULT hr = CoCreateInstance(CLSID_TF_ThreadMgr, nullptr, CLSCTX_INPROC_SERVER,
+                                   IID_ITfThreadMgr, (void**)&threadMgr);
+    if (FAILED(hr) || !threadMgr) return;
+
+    TfClientId clientId = 0;
+    threadMgr->Activate(&clientId);
+
+    ITfCompartmentMgr* compMgr = nullptr;
+    hr = threadMgr->QueryInterface(IID_ITfCompartmentMgr, (void**)&compMgr);
+    if (SUCCEEDED(hr) && compMgr) {
+        ITfCompartment* comp = nullptr;
+        hr = compMgr->GetCompartment(GUID_COMPARTMENT_KEYBOARD_OPENCLOSE, &comp);
+        if (SUCCEEDED(hr) && comp) {
             VARIANT var;
             VariantInit(&var);
             var.vt = VT_I4;
-            var.lVal = 0;
+            var.lVal = 0;  // 关闭 IME → 英文模式
             comp->SetValue(clientId, &var);
             comp->Release();
         }
