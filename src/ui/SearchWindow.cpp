@@ -26,6 +26,7 @@
 #endif
 #include <windows.h>
 #include <windowsx.h>
+#include <msctf.h>    // TSF IME 控制：GUID_COMPARTMENT_KEYBOARD_OPENCLOSE
 
 namespace {
 // 右键菜单动作 id（与 ContextMenu::addItem 的 action 对应）
@@ -125,9 +126,13 @@ void SearchWindow::showWithFadeIn() {
     anim->setEndValue(1.0);
     anim->setEasingCurve(QEasingCurve::OutCubic);
     anim->start(QAbstractAnimation::DeleteWhenStopped);
+
+    // 默认英文输入：defer 到下一事件循环等 OS 完成 IME 激活后再关闭
+    QTimer::singleShot(0, this, [this]() { EnsureEnglishInput(); });
 }
 
 void SearchWindow::hideWithFadeOut() {
+    RestoreIme();  // 恢复弹出前的 IME 状态（若原为中文则切回中文）
     preeditText_.clear();
 
     auto* anim = new QPropertyAnimation(this, "windowOpacity", this);
@@ -137,6 +142,76 @@ void SearchWindow::hideWithFadeOut() {
     anim->setEasingCurve(QEasingCurve::InCubic);
     connect(anim, &QPropertyAnimation::finished, this, &QWidget::hide);
     anim->start(QAbstractAnimation::DeleteWhenStopped);
+}
+
+void SearchWindow::EnsureEnglishInput() {
+    // 通过 TSF 关闭 IME，使搜索框默认英文输入（用户 Shift 可切中文）
+    // ImmSetConversionStatus/ImmSetOpenStatus 对 TSF IME（微软拼音/搜狗）无效，
+    // 必须走 TSF COM 设 GUID_COMPARTMENT_KEYBOARD_OPENCLOSE = 0。
+    ITfThreadMgr* threadMgr = nullptr;
+    HRESULT hr = CoCreateInstance(CLSID_TF_ThreadMgr, nullptr, CLSCTX_INPROC_SERVER,
+                                   IID_ITfThreadMgr, (void**)&threadMgr);
+    if (FAILED(hr) || !threadMgr) return;
+
+    TfClientId clientId = 0;
+    threadMgr->Activate(&clientId);  // 已激活时返回 S_FALSE，无害
+
+    ITfCompartmentMgr* compMgr = nullptr;
+    hr = threadMgr->QueryInterface(IID_ITfCompartmentMgr, (void**)&compMgr);
+    if (SUCCEEDED(hr) && compMgr) {
+        ITfCompartment* comp = nullptr;
+        hr = compMgr->GetCompartment(GUID_COMPARTMENT_KEYBOARD_OPENCLOSE, &comp);
+        if (SUCCEEDED(hr) && comp) {
+            // 先查询当前 IME 开关状态，保存用于 RestoreIme()
+            VARIANT curVar;
+            VariantInit(&curVar);
+            if (SUCCEEDED(comp->GetValue(&curVar)) && curVar.vt == VT_I4) {
+                imeWasOpen_ = (curVar.lVal != 0);
+            }
+            VariantClear(&curVar);
+
+            // 关闭 IME → 字母数字/英文模式
+            VARIANT var;
+            VariantInit(&var);
+            var.vt = VT_I4;
+            var.lVal = 0;
+            comp->SetValue(clientId, &var);
+            comp->Release();
+        }
+        compMgr->Release();
+    }
+    threadMgr->Release();
+}
+
+void SearchWindow::RestoreIme() {
+    if (!imeWasOpen_) return;  // 弹出前 IME 本就关闭，无需恢复
+
+    ITfThreadMgr* threadMgr = nullptr;
+    HRESULT hr = CoCreateInstance(CLSID_TF_ThreadMgr, nullptr, CLSCTX_INPROC_SERVER,
+                                   IID_ITfThreadMgr, (void**)&threadMgr);
+    if (FAILED(hr) || !threadMgr) return;
+
+    TfClientId clientId = 0;
+    threadMgr->Activate(&clientId);
+
+    ITfCompartmentMgr* compMgr = nullptr;
+    hr = threadMgr->QueryInterface(IID_ITfCompartmentMgr, (void**)&compMgr);
+    if (SUCCEEDED(hr) && compMgr) {
+        ITfCompartment* comp = nullptr;
+        hr = compMgr->GetCompartment(GUID_COMPARTMENT_KEYBOARD_OPENCLOSE, &comp);
+        if (SUCCEEDED(hr) && comp) {
+            VARIANT var;
+            VariantInit(&var);
+            var.vt = VT_I4;
+            var.lVal = 1;  // 恢复 IME 开启（中文输入模式）
+            comp->SetValue(clientId, &var);
+            comp->Release();
+        }
+        compMgr->Release();
+    }
+    threadMgr->Release();
+
+    imeWasOpen_ = false;  // 重置，避免重复恢复
 }
 
 void SearchWindow::onSearchFinished(const QVector<ResultItem>& results) {

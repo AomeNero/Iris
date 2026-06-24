@@ -57,6 +57,8 @@ private:
     QRect GetListRect() const;
     void OpenSelected();
     void OpenByVisibleNo(int visibleNo);  // Ctrl+1..9：打开第N可见行（对应右侧 ctrlN 提示）
+    void EnsureEnglishInput();           // 弹出时关闭 TSF IME，默认英文输入
+    void RestoreIme();                   // 隐藏时恢复弹出前的 IME 状态
 
     SearchBar     searchBar_;
     ResultListView resultList_;
@@ -66,6 +68,7 @@ private:
     QTimer  cursorTimer_;
     bool    cursorVisible_ = true;
     bool    suppressAutoHide_ = false;  // 弹模态对话框期间抑制失焦自动隐藏
+    bool    imeWasOpen_ = false;         // 弹出前 IME 是否开启（隐藏时据此恢复）
 
     static constexpr int kWindowWidth  = 1440;
     static constexpr int kInputHeight   = SearchBar::kHeight;   // 100

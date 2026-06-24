@@ -67,7 +67,7 @@ target_link_libraries(Iris PRIVATE
     Qt5::Core Qt5::Gui Qt5::Widgets Qt5::Svg Qt5::WinExtras
     Qt5::WinMain                              # Qt5 静态 WIN32 子系统的 WinMain
     nlohmann_json sqlite3 cpp-pinyin
-    advapi32 shell32 ole32 oleaut32 user32 gdi32 imm32)
+    advapi32 shell32 ole32 oleaut32 user32 gdi32 imm32 uuid)
 # 静态 Qt5：排除 QTiffPlugin（其依赖 Qt5::Zlib 在本静态 Qt 安装中缺失）
 qt5_import_plugins(Iris EXCLUDE Qt5::QTiffPlugin)
 set_target_properties(Iris PROPERTIES
