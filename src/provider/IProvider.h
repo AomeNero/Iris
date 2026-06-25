@@ -51,6 +51,8 @@ public:
     virtual bool Initialize() = 0;
     /// 关闭数据源，释放资源
     virtual void Shutdown() = 0;
+    /// 请求取消正在进行的 Initialize（退出时主线程在 join 索引线程前调用，使其快速返回）
+    virtual void CancelInitialize() {}
 
     // ---- 数据获取 ----
     /// 返回全量结果（仅 Engine 初始化时调用一次，非搜索路径）

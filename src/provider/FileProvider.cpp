@@ -112,6 +112,10 @@ FileProvider::~FileProvider() { Shutdown(); }
 // ============================================================================
 // Initialize：枚举卷 → 全量 USN 索引 → CoW 原子替换
 // ============================================================================
+void FileProvider::CancelInitialize() {
+    cancelInitialize_.store(true, std::memory_order_release);
+}
+
 bool FileProvider::Initialize() {
     IRIS_LOG_INFO(L"FileProvider 初始化开始");
 
@@ -122,6 +126,10 @@ bool FileProvider::Initialize() {
     uint64_t files = 0, dirs = 0;
 
     for (const auto& root : drives) {
+        if (cancelInitialize_.load(std::memory_order_acquire)) {
+            IRIS_LOG_INFO(L"FileProvider 初始化已取消");
+            return false;  // 不 ReplaceIndex / 不置 ready_，直接退出
+        }
         VolumeInfo vol;
         vol.rootPath = root;
         vol.driveLetter = root.empty() ? 0 : root[0];
@@ -141,6 +149,10 @@ bool FileProvider::Initialize() {
         volumes_.push_back(std::move(vol));
     }
 
+    if (cancelInitialize_.load(std::memory_order_acquire)) {
+        IRIS_LOG_INFO(L"FileProvider 初始化已取消");
+        return false;  // 扫描中途被取消，不发布半成品索引
+    }
     store->Sort();
     files = store->size();
 
@@ -187,6 +199,10 @@ bool FileProvider::BuildVolumeIndex(const VolumeInfo& vol, IndexStore& store,
     std::vector<BYTE> buffer(kBufSize);
 
     while (true) {
+        if (cancelInitialize_.load(std::memory_order_acquire)) {
+            CloseHandle(h);
+            return false;  // 取消：关闭卷句柄，不泄漏
+        }
         br = 0;
         BOOL ok = DeviceIoControl(h, FSCTL_ENUM_USN_DATA, &med, sizeof(med),
                                   buffer.data(), kBufSize, &br, nullptr);
@@ -284,6 +300,7 @@ void FileProvider::FallbackScan(const VolumeInfo& vol, IndexStore& store,
     auto it = fs::recursive_directory_iterator(vol.rootPath,
             fs::directory_options::skip_permission_denied, ec);
     for (const auto end = fs::recursive_directory_iterator(); it != end; it.increment(ec)) {
+        if (cancelInitialize_.load(std::memory_order_acquire)) return;
         if (ec) { ec.clear(); continue; }
         const auto& path = it->path();
 

@@ -55,6 +55,10 @@ void AppProvider::Refresh() {
     }
 }
 
+void AppProvider::CancelInitialize() {
+    cancelInitialize_.store(true, std::memory_order_release);
+}
+
 bool AppProvider::Rebuild() {
     // WinUtil::ResolveShortcut 走 IShellLink COM。对称配对（同线程 CoInit/CoUninit），
     // 使本方法无论由 Initialize 的索引线程还是 Refresh 的 UI 线程调用都能正确配对。
@@ -68,40 +72,47 @@ bool AppProvider::Rebuild() {
 
     std::vector<Entry> entries;
     // 开始菜单优先（用户 > 公共），桌面次之（用户 > 公共）
+    // ScanDirectory 内部检测 cancelInitialize_ 会提前返回
     ScanDirectory(WinUtil::GetKnownFolderPath(FOLDERID_Programs), entries);
     ScanDirectory(WinUtil::GetKnownFolderPath(FOLDERID_CommonPrograms), entries);
     ScanDirectory(WinUtil::GetKnownFolderPath(FOLDERID_Desktop), entries);
     ScanDirectory(WinUtil::GetKnownFolderPath(FOLDERID_PublicDesktop), entries);
 
+    bool canceled = cancelInitialize_.load(std::memory_order_acquire);
+
     // UWP（暂为 stub，返回空）；纳入后由去重/排序统一处理
-    for (const auto& uwp : WinUtil::EnumerateUwpApps()) {
-        if (uwp.name.empty()) continue;
-        Entry e;
-        e.title = uwp.name;
-        e.targetPath = uwp.appUserModelId;  // AUMID 用于启动
-        entries.push_back(std::move(e));
+    if (!canceled) {
+        for (const auto& uwp : WinUtil::EnumerateUwpApps()) {
+            if (uwp.name.empty()) continue;
+            Entry e;
+            e.title = uwp.name;
+            e.targetPath = uwp.appUserModelId;  // AUMID 用于启动
+            entries.push_back(std::move(e));
+        }
+
+        DeduplicateByName(entries);
+
+        // 按 title 字典序（CI）排序——Matcher 前缀扫描早停所必需
+        std::sort(entries.begin(), entries.end(),
+                  [](const Entry& a, const Entry& b) {
+                      return _wcsicmp(a.title.c_str(), b.title.c_str()) < 0;
+                  });
+
+        // 预计算拼音（拼音匹配用；App 条目少，瞬间完成）
+        for (auto& e : entries) {
+            if (cancelInitialize_.load(std::memory_order_acquire)) { canceled = true; break; }
+            e.pinyinFull = PinyinUtil::ToFull(e.title);
+            e.pinyinInitials = PinyinUtil::ToInitials(e.title);
+        }
     }
 
-    DeduplicateByName(entries);
-
-    // 按 title 字典序（CI）排序——Matcher 前缀扫描早停所必需
-    std::sort(entries.begin(), entries.end(),
-              [](const Entry& a, const Entry& b) {
-                  return _wcsicmp(a.title.c_str(), b.title.c_str()) < 0;
-              });
-
-    // 预计算拼音（拼音匹配用；App 条目少，瞬间完成）
-    for (auto& e : entries) {
-        e.pinyinFull = PinyinUtil::ToFull(e.title);
-        e.pinyinInitials = PinyinUtil::ToInitials(e.title);
+    if (!canceled) {
+        IRIS_LOG_INFO(L"AppProvider: 索引完成，应用数=" + std::to_wstring(entries.size()));
+        ReplaceEntries(std::make_shared<const std::vector<Entry>>(std::move(entries)));
     }
-
-    IRIS_LOG_INFO(L"AppProvider: 索引完成，应用数=" + std::to_wstring(entries.size()));
-
-    ReplaceEntries(std::make_shared<const std::vector<Entry>>(std::move(entries)));
 
     if (didInit) CoUninitialize();  // 与 Rebuild 开头的 CoInitializeEx 同线程配对
-    return true;
+    return !canceled;
 }
 
 void AppProvider::ScanDirectory(const std::wstring& dir, std::vector<Entry>& out) const {
@@ -116,6 +127,7 @@ void AppProvider::ScanDirectory(const std::wstring& dir, std::vector<Entry>& out
     int lnkFound = 0, resolved = 0;
     const auto opts = std::filesystem::directory_options::skip_permission_denied;
     for (const auto& it : std::filesystem::recursive_directory_iterator(p, opts, ec)) {
+        if (cancelInitialize_.load(std::memory_order_acquire)) return;
         if (ec) break;
         if (it.is_directory(ec)) continue;
         const std::wstring lnkPath = it.path().wstring();

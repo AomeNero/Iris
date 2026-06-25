@@ -60,6 +60,9 @@ private:
     void EnsureEnglishInput();           // 弹出时关闭 TSF IME，默认英文输入
     void QueryAndSaveImeState();         // setFocus 前保存系统 IME 原状态
     void RestoreIme();                   // 隐藏时恢复弹出前的 IME 状态
+    void SetImeOpenStatus(long val);     // 设 TSF OPENCLOSE（0=关/英文，1=开/中文）
+    long GetImeOpenStatus();             // 读 TSF OPENCLOSE（-1=读取失败）
+    void OnEnglishConfirmTick();         // 确认定时器：首次激活覆盖时重设 OPEN=0 到稳定
 
     SearchBar     searchBar_;
     ResultListView resultList_;
@@ -69,8 +72,11 @@ private:
     QTimer  cursorTimer_;
     bool    cursorVisible_ = true;
     bool    suppressAutoHide_ = false;  // 弹模态对话框期间抑制失焦自动隐藏
-    bool    imeWasOpen_ = false;         // 弹出前 IME 是否开启（隐藏时据此恢复）
-    bool    imeStateSaved_ = false;      // 防重入：EnsureEnglishInput 多次调用只保存首次
+    bool    imeWasChinese_ = false;      // 弹出前是否中文模式（是→关/重开 IME；否→完全不碰）
+    bool    imeStateSaved_ = false;      // 防重入：每次弹出只保存首次原状态
+    QTimer  imeConfirmTimer_;            // 首次激活覆盖后重设 OPEN=0 的确认循环
+    int     imeEnglishRetry_ = 0;        // 确认循环已重试次数（达 kEnglishMaxRetry 停）
+    int     imeEnglishStable_ = 0;       // 确认循环连续 OPEN=0 次数（达 kEnglishStableNeed 停）
 
     static constexpr int kWindowWidth  = 1440;
     static constexpr int kInputHeight   = SearchBar::kHeight;   // 100

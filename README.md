@@ -1,4 +1,4 @@
-# 🌸 Iris
+#  ![](resources/iris.png)Iris
 
 > Windows 极速桌面启动器——快捷键秒搜文件、应用与书签。
 
@@ -52,7 +52,7 @@ Windows 自带的搜索慢且入口分散——找文件要去资源管理器、
 
 **方式 A · 下载即用（推荐普通用户）**
 
-前往 [Releases](https://github.com/AomeNero/Iris/releases) 下载 `Iris.exe`，放入任意目录双击运行，托盘出现 🌸 图标即就绪。
+前往 [Releases](https://github.com/AomeNero/Iris/releases) 下载 `Iris.exe`，放入任意目录双击运行，托盘出现  ![](resources/iris.png)图标即就绪。
 
 **方式 B · 源码构建（开发者）**
 

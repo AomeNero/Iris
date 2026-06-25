@@ -36,6 +36,7 @@ public:
     // ---- IProvider ----
     bool Initialize() override;
     void Shutdown() override;
+    void CancelInitialize() override;
     std::vector<ResultItem> GetAll() const override;
     size_t GetCount() const override;
     std::wstring GetName() const override { return L"AppProvider"; }
@@ -66,6 +67,7 @@ private:
     std::shared_ptr<const std::vector<Entry>> entries_;
     mutable std::mutex swapMutex_;
     std::atomic<bool> ready_{false};
+    std::atomic<bool> cancelInitialize_{false};  // 退出时 set，使 Initialize/Rebuild 快速结束
 };
 
 } // namespace iris

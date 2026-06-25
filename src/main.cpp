@@ -187,7 +187,7 @@ int main(int argc, char* argv[]) {
     QObject::connect(&tray, &TrayIcon::aboutRequested, [&w]() {
         w.SetSuppressAutoHide(true);   // 对话框夺焦期间阻止自动隐藏，避免模态恢复崩溃
         QMessageBox::information(nullptr, QString::fromUtf8("关于 Iris"),
-            QString::fromUtf8("Iris v1.1.0\n超级启动器\n"
+            QString::fromUtf8("Iris v1.2.0\n超级启动器\n"
                               "能帮你秒开软件，还能搜文件和网络收藏夹哦！\n"
                               "Author:AomeNero eMail:yotianya@gmail.com\n\n"));
         // 对话框关闭后主动夺回焦点（Qt::Tool 窗口不会自动重新获焦，否则卡住）
@@ -231,7 +231,11 @@ int main(int argc, char* argv[]) {
 
     const int ret = app.exec();
 
-    // 先 join 索引线程（确保 Initialize 已结束），再 Shutdown（避免与 Initialize 并发竞争）
+    // 先请求取消尚未完成的 Initialize（让全盘扫描快速返回），再 join 索引线程，
+    // 最后 Shutdown（避免与 Initialize 并发竞争）。避免退出时长时间等待索引扫完。
+    if (file)     file->CancelInitialize();
+    if (bookmark) bookmark->CancelInitialize();
+    if (apps)     apps->CancelInitialize();
     for (auto& t : initThreads) {
         if (t.joinable()) t.join();
     }

@@ -33,6 +33,7 @@ public:
     // ---- IProvider ----
     bool Initialize() override;
     void Shutdown() override;
+    void CancelInitialize() override;
     std::vector<ResultItem> GetAll() const override;
     size_t GetCount() const override;
     std::wstring GetName() const override { return L"FileProvider"; }
@@ -92,6 +93,7 @@ private:
     std::atomic<uint64_t>             totalDirs_{0};
     bool                              excludeHidden_ = true;
     bool                              excludeSystem_ = true;
+    std::atomic<bool>                 cancelInitialize_{false};  // 退出时 set，使 Initialize 快速结束
 };
 
 } // namespace iris

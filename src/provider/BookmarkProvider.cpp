@@ -110,6 +110,10 @@ void BookmarkProvider::Refresh() {
     }
 }
 
+void BookmarkProvider::CancelInitialize() {
+    cancelInitialize_.store(true, std::memory_order_release);
+}
+
 bool BookmarkProvider::Rebuild() {
     const std::wstring localAppData = WinUtil::GetKnownFolderPath(FOLDERID_LocalAppData);
     if (localAppData.empty()) return false;
@@ -120,7 +124,9 @@ bool BookmarkProvider::Rebuild() {
     CollectSources(base / L"Microsoft\\Edge\\User Data", true, sources);
 
     std::vector<Entry> entries;
+    bool canceled = false;
     for (const auto& src : sources) {
+        if (cancelInitialize_.load(std::memory_order_acquire)) { canceled = true; break; }
         std::ifstream ifs(src.path);
         if (!ifs) continue;
         const std::string text((std::istreambuf_iterator<char>(ifs)),
@@ -132,22 +138,27 @@ bool BookmarkProvider::Rebuild() {
         }
     }
 
-    // 按 title 字典序（CI）排序——Matcher 前缀扫描早停所必需
-    std::sort(entries.begin(), entries.end(),
-              [](const Entry& a, const Entry& b) {
-                  return _wcsicmp(a.title.c_str(), b.title.c_str()) < 0;
-              });
+    if (!canceled) {
+        // 按 title 字典序（CI）排序——Matcher 前缀扫描早停所必需
+        std::sort(entries.begin(), entries.end(),
+                  [](const Entry& a, const Entry& b) {
+                      return _wcsicmp(a.title.c_str(), b.title.c_str()) < 0;
+                  });
 
-    // 预计算拼音（拼音匹配用）
-    for (auto& e : entries) {
-        e.pinyinFull = PinyinUtil::ToFull(e.title);
-        e.pinyinInitials = PinyinUtil::ToInitials(e.title);
+        // 预计算拼音（拼音匹配用）
+        for (auto& e : entries) {
+            if (cancelInitialize_.load(std::memory_order_acquire)) { canceled = true; break; }
+            e.pinyinFull = PinyinUtil::ToFull(e.title);
+            e.pinyinInitials = PinyinUtil::ToInitials(e.title);
+        }
     }
 
-    const size_t count = entries.size();
-    ReplaceEntries(std::make_shared<const std::vector<Entry>>(std::move(entries)));
-    IRIS_LOG_INFO(L"BookmarkProvider: 索引完成，书签数=" + std::to_wstring(count));
-    return true;
+    if (!canceled) {
+        const size_t count = entries.size();
+        ReplaceEntries(std::make_shared<const std::vector<Entry>>(std::move(entries)));
+        IRIS_LOG_INFO(L"BookmarkProvider: 索引完成，书签数=" + std::to_wstring(count));
+    }
+    return !canceled;
 }
 
 void BookmarkProvider::ParseBookmarksText(const std::string& utf8Json, bool isEdge,

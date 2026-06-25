@@ -26,11 +26,21 @@
 #endif
 #include <windows.h>
 #include <windowsx.h>
-#include <msctf.h>    // TSF IME 控制：GUID_COMPARTMENT_KEYBOARD_OPENCLOSE
+#include <msctf.h>    // TSF IME 控制：GUID_COMPARTMENT_KEYBOARD_OPENCLOSE / INPUTMODE_CONVERSION
 
 namespace {
 // 右键菜单动作 id（与 ContextMenu::addItem 的 action 对应）
 enum ContextAction { ACT_OPEN = 1, ACT_REVEAL, ACT_COPY, ACT_PROPS };
+
+// IME 转换模式标志位：与 imm.h 的 IME_CMODE_NATIVE 同值（TSF conversion compartment 复用此编码）。
+// 置位=中文模式；清零=英文模式（IME 开着但直通英文）。仅用其值判读，不走 IMM API。
+constexpr long kImeCmodeNative = 0x00000001;
+
+// 弹出后"英文确认循环"参数：首次弹出时微软拼音的首次 IME 激活会异步把 OPENCLOSE 覆盖回 1（中文），
+// 本次 set 之后需在时间窗口内反复校验并重设，压过该覆盖。
+constexpr int kEnglishRecheckMs  = 70;   // 确认定时器间隔
+constexpr int kEnglishStableNeed = 3;    // 连续读到 OPEN=0 的次数 → 视为稳定，停止确认
+constexpr int kEnglishMaxRetry   = 10;   // 确认总次数上限（兜底，最长 ~700ms）
 }
 
 namespace iris {
@@ -48,6 +58,8 @@ SearchWindow::SearchWindow(QWidget* parent) : QWidget(parent) {
     });
     cursorTimer_.setInterval(530);
     cursorTimer_.start();
+
+    connect(&imeConfirmTimer_, &QTimer::timeout, this, &SearchWindow::OnEnglishConfirmTick);
 
     RebuildLayout();
     setFocusPolicy(Qt::StrongFocus);
@@ -132,11 +144,13 @@ void SearchWindow::showWithFadeIn() {
     anim->setEasingCurve(QEasingCurve::OutCubic);
     anim->start(QAbstractAnimation::DeleteWhenStopped);
 
-    // 默认英文输入：defer 到下一事件循环等 OS 完成 IME 激活后再关闭
+    // 默认英文输入：弹出一律关 IME 强制英文（defer 到下一事件循环，等 OS 完成 IME 激活后再关闭）。
+    // 隐藏时 RestoreIme 据 imeWasChinese_ 决定是否重开，避免英文模式重开落回中文。
     QTimer::singleShot(0, this, [this]() { EnsureEnglishInput(); });
 }
 
 void SearchWindow::hideWithFadeOut() {
+    imeConfirmTimer_.stop();  // 停止英文确认循环，避免隐藏后继续把 IME 重设为英文、干扰 RestoreIme
     RestoreIme();  // 恢复弹出前的 IME 状态（若原为中文则切回中文）
     preeditText_.clear();
 
@@ -163,17 +177,35 @@ void SearchWindow::QueryAndSaveImeState() {
     ITfCompartmentMgr* compMgr = nullptr;
     hr = threadMgr->QueryInterface(IID_ITfCompartmentMgr, (void**)&compMgr);
     if (SUCCEEDED(hr) && compMgr) {
+        // OPENCLOSE：IME 是否开启
+        bool imeOpen = false;
         ITfCompartment* comp = nullptr;
-        hr = compMgr->GetCompartment(GUID_COMPARTMENT_KEYBOARD_OPENCLOSE, &comp);
-        if (SUCCEEDED(hr) && comp) {
+        if (SUCCEEDED(compMgr->GetCompartment(GUID_COMPARTMENT_KEYBOARD_OPENCLOSE, &comp)) && comp) {
+            VARIANT var;
+            VariantInit(&var);
+            if (SUCCEEDED(comp->GetValue(&var)) && var.vt == VT_I4)
+                imeOpen = (var.lVal != 0);
+            VariantClear(&var);
+            comp->Release();
+        }
+        // INPUTMODE_CONVERSION：中/英模式（IME_CMODE_NATIVE 置位=中文）。
+        // 微软拼音用 Shift 在 IME 内切中/英，OPENCLOSE 恒为开，须靠此处分辨英文模式。
+        bool convReadOk = false;
+        bool native = false;
+        if (SUCCEEDED(compMgr->GetCompartment(GUID_COMPARTMENT_KEYBOARD_INPUTMODE_CONVERSION, &comp)) && comp) {
             VARIANT var;
             VariantInit(&var);
             if (SUCCEEDED(comp->GetValue(&var)) && var.vt == VT_I4) {
-                imeWasOpen_ = (var.lVal != 0);
+                native = (var.lVal & kImeCmodeNative) != 0;
+                convReadOk = true;
             }
             VariantClear(&var);
             comp->Release();
         }
+        // imeWasChinese_ 仅用于"隐藏时是否重开 IME"：原中文模式→重开（落回中文=正确）；
+        // 英文模式→不重开（否则落回中文=误切）。显示时一律关 IME，与本标志无关。
+        // 读不到 conversion 时退化为"开即中文"，与旧行为一致，不回归。
+        imeWasChinese_ = convReadOk ? (imeOpen && native) : imeOpen;
         compMgr->Release();
     }
     threadMgr->Release();
@@ -182,37 +214,20 @@ void SearchWindow::QueryAndSaveImeState() {
 }
 
 void SearchWindow::EnsureEnglishInput() {
-    // 通过 TSF 关闭 IME，使搜索框默认英文输入（用户 Shift 可切中文）
+    // 通过 TSF 关闭 IME，使搜索框默认英文输入（用户 Shift 可切中文）。
     // ImmSetConversionStatus/ImmSetOpenStatus 对 TSF IME 无效，必须走 TSF COM。
     // 状态保存由 QueryAndSaveImeState() 在 setFocus 前完成，此处仅关闭。
-    ITfThreadMgr* threadMgr = nullptr;
-    HRESULT hr = CoCreateInstance(CLSID_TF_ThreadMgr, nullptr, CLSCTX_INPROC_SERVER,
-                                   IID_ITfThreadMgr, (void**)&threadMgr);
-    if (FAILED(hr) || !threadMgr) return;
+    SetImeOpenStatus(0);
 
-    TfClientId clientId = 0;
-    threadMgr->Activate(&clientId);
-
-    ITfCompartmentMgr* compMgr = nullptr;
-    hr = threadMgr->QueryInterface(IID_ITfCompartmentMgr, (void**)&compMgr);
-    if (SUCCEEDED(hr) && compMgr) {
-        ITfCompartment* comp = nullptr;
-        hr = compMgr->GetCompartment(GUID_COMPARTMENT_KEYBOARD_OPENCLOSE, &comp);
-        if (SUCCEEDED(hr) && comp) {
-            VARIANT var;
-            VariantInit(&var);
-            var.vt = VT_I4;
-            var.lVal = 0;  // 关闭 IME → 英文模式
-            comp->SetValue(clientId, &var);
-            comp->Release();
-        }
-        compMgr->Release();
-    }
-    threadMgr->Release();
+    // 首次弹出时，Windows/微软拼音的"首次 IME 激活"会异步把 OPENCLOSE 覆盖回 1（中文），
+    // 发生在本次 set 之后约 0~200ms。故启动确认循环：被覆盖则重设，连续稳定或达上限后停止。
+    imeEnglishRetry_ = 0;
+    imeEnglishStable_ = 0;
+    imeConfirmTimer_.start(kEnglishRecheckMs);
 }
 
 void SearchWindow::RestoreIme() {
-    if (!imeWasOpen_) return;  // 弹出前 IME 本就关闭，无需恢复
+    if (!imeWasChinese_) return;  // 弹出前非中文模式（英文模式/IME 关），无需恢复
 
     ITfThreadMgr* threadMgr = nullptr;
     HRESULT hr = CoCreateInstance(CLSID_TF_ThreadMgr, nullptr, CLSCTX_INPROC_SERVER,
@@ -239,8 +254,78 @@ void SearchWindow::RestoreIme() {
     }
     threadMgr->Release();
 
-    imeWasOpen_ = false;   // 重置，避免重复恢复
-    imeStateSaved_ = false; // 重置，下次弹出重新保存
+    imeWasChinese_ = false;  // 重置，避免重复恢复
+    imeStateSaved_ = false;  // 重置，下次弹出重新保存
+}
+
+// 设 TSF OPENCLOSE compartment（0=关 IME/英文，1=开 IME/中文）
+void SearchWindow::SetImeOpenStatus(long val) {
+    ITfThreadMgr* threadMgr = nullptr;
+    HRESULT hr = CoCreateInstance(CLSID_TF_ThreadMgr, nullptr, CLSCTX_INPROC_SERVER,
+                                   IID_ITfThreadMgr, (void**)&threadMgr);
+    if (FAILED(hr) || !threadMgr) return;
+
+    TfClientId clientId = 0;
+    threadMgr->Activate(&clientId);
+
+    ITfCompartmentMgr* compMgr = nullptr;
+    hr = threadMgr->QueryInterface(IID_ITfCompartmentMgr, (void**)&compMgr);
+    if (SUCCEEDED(hr) && compMgr) {
+        ITfCompartment* comp = nullptr;
+        hr = compMgr->GetCompartment(GUID_COMPARTMENT_KEYBOARD_OPENCLOSE, &comp);
+        if (SUCCEEDED(hr) && comp) {
+            VARIANT var;
+            VariantInit(&var);
+            var.vt = VT_I4;
+            var.lVal = val;
+            comp->SetValue(clientId, &var);
+            comp->Release();
+        }
+        compMgr->Release();
+    }
+    threadMgr->Release();
+}
+
+// 读 TSF OPENCLOSE compartment；读取失败返回 -1
+long SearchWindow::GetImeOpenStatus() {
+    ITfThreadMgr* threadMgr = nullptr;
+    HRESULT hr = CoCreateInstance(CLSID_TF_ThreadMgr, nullptr, CLSCTX_INPROC_SERVER,
+                                   IID_ITfThreadMgr, (void**)&threadMgr);
+    if (FAILED(hr) || !threadMgr) return -1;
+
+    TfClientId clientId = 0;
+    threadMgr->Activate(&clientId);
+
+    long openVal = -1;
+    ITfCompartmentMgr* compMgr = nullptr;
+    hr = threadMgr->QueryInterface(IID_ITfCompartmentMgr, (void**)&compMgr);
+    if (SUCCEEDED(hr) && compMgr) {
+        ITfCompartment* comp = nullptr;
+        hr = compMgr->GetCompartment(GUID_COMPARTMENT_KEYBOARD_OPENCLOSE, &comp);
+        if (SUCCEEDED(hr) && comp) {
+            VARIANT var; VariantInit(&var);
+            if (SUCCEEDED(comp->GetValue(&var)) && var.vt == VT_I4) openVal = var.lVal;
+            VariantClear(&var);
+            comp->Release();
+        }
+        compMgr->Release();
+    }
+    threadMgr->Release();
+    return openVal;
+}
+
+// 确认循环：弹出后反复校验 OPENCLOSE，被首次激活覆盖（变 1）则重设回 0，直到稳定或达上限
+void SearchWindow::OnEnglishConfirmTick() {
+    const long open = GetImeOpenStatus();
+    if (open != 0) {
+        SetImeOpenStatus(0);   // 被微软拼音首次激活覆盖回中文，重设为英文
+        imeEnglishStable_ = 0;
+    } else if (++imeEnglishStable_ >= kEnglishStableNeed) {
+        imeConfirmTimer_.stop();  // 连续稳定为英文，结束确认
+        return;
+    }
+    if (++imeEnglishRetry_ >= kEnglishMaxRetry)
+        imeConfirmTimer_.stop();  // 兜底：确认窗口耗尽（首次激活覆盖通常 ~200ms 内完成）
 }
 
 void SearchWindow::onSearchFinished(const QVector<ResultItem>& results) {
