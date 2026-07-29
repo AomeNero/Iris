@@ -5,6 +5,7 @@
 #include <QString>
 #include <QVector>
 
+#include "core/DpiHelper.h"
 #include "provider/IProvider.h"
 
 class QPainter;
@@ -40,10 +41,10 @@ public:
     // 计算列表区域总高度（空态 kEmptyHeight；否则上限 kMaxVisibleRows 行）
     int  CalculateHeight() const;
 
-    static constexpr int kRowHSelected   = 92;
-    static constexpr int kRowHNormal     = 92;   // 等高（Alfred 5 规格）
+    static int RowHSelected() { return DpiHelper::Scale(92); }
+    static int RowHNormal()   { return DpiHelper::Scale(92); }   // 等高（Alfred 5 规格）
     static constexpr int kMaxVisibleRows = 9;    // Ctrl+1..Ctrl+9 映射到可见行
-    static constexpr int kEmptyHeight    = 80;
+    static int EmptyHeight()  { return DpiHelper::Scale(80); }
 
 private:
     void PaintRow(QPainter& p, int rowIdx, const QRect& rowRect);
@@ -54,7 +55,7 @@ private:
 
     int  VisibleCount() const { const int s = results_.size(); return s < kMaxVisibleRows ? s : kMaxVisibleRows; }  // 视窗容量（恒 9 或 size）
     int  RowsThisPage() const;             // 当前 scrollOffset_ 下实际显示行数（末页可能不足 9）
-    int  VisibleRowHeight(int idx) const { return (idx == selectedIndex_) ? kRowHSelected : kRowHNormal; }
+    int  VisibleRowHeight(int idx) const { return (idx == selectedIndex_) ? RowHSelected() : RowHNormal(); }
     void EnsureBounds();
     void EnsureSelectionVisible();
 

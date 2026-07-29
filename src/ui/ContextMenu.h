@@ -7,6 +7,8 @@
 #include <QVector>
 #include <QWidget>
 
+#include "core/DpiHelper.h"
+
 namespace iris {
 
 class ContextMenu : public QWidget {
@@ -41,10 +43,10 @@ private:
     QVector<Item> items_;
     int selectedIndex_ = -1;
 
-    static constexpr int kPadV   = 6;    // 上下内边距
-    static constexpr int kPadH   = 22;   // 左右内边距
-    static constexpr int kRowH   = 38;   // 行高
-    static constexpr int kRadius = 12;   // 圆角
+    static int PadV()   { return DpiHelper::Scale(6); }    // 上下内边距
+    static int PadH()   { return DpiHelper::Scale(22); }   // 左右内边距
+    static int RowH()   { return DpiHelper::Scale(38); }   // 行高
+    static int Radius() { return DpiHelper::Scale(12); }   // 圆角
 };
 
 } // namespace iris

@@ -17,11 +17,11 @@ void SearchBar::Paint(QPainter& p, const QRect& rect, const QString& text, const
     p.setRenderHint(QPainter::Antialiasing);
 
     // iris 图标尺寸（随输入框高度自适应）
-    const int iconSize = rect.height() - 2 * kPadH - 8;
+    const int iconSize = rect.height() - 2 * PadH() - 8;
 
-    // 1. 输入框：左/上/下 缩进 kPadH(20)；右侧缩进 (40+iconSize) 为 iris 让出
+    // 1. 输入框：左/上/下 缩进 PadH(20)；右侧缩进 (40+iconSize) 为 iris 让出
     //    [距框20 + iris宽 + 距窗口右20]，使 iris 落在框外右侧（灰底上）
-    const QRect box = rect.adjusted(kPadH, kPadH, -(40 + iconSize), -kPadH);
+    const QRect box = rect.adjusted(PadH(), PadH(), -(40 + iconSize), -PadH());
     p.setPen(Qt::NoPen);
     p.setBrush(CurrentPalette().inputBg);
     p.drawRoundedRect(box, 12, 12);
@@ -30,8 +30,8 @@ void SearchBar::Paint(QPainter& p, const QRect& rect, const QString& text, const
     p.setFont(font_);
     const QFontMetrics fm(font_);
     const int cursorH = box.height() - 16;
-    const int textLeft  = box.left() + kPadH;
-    const int textRight = box.right() - kPadH;
+    const int textLeft  = box.left() + PadH();
+    const int textRight = box.right() - PadH();
 
     const int textW    = fm.horizontalAdvance(text);
     const int preeditW = preedit.isEmpty() ? 0 : fm.horizontalAdvance(preedit);
@@ -59,15 +59,15 @@ void SearchBar::Paint(QPainter& p, const QRect& rect, const QString& text, const
         if (cursorVisible && hasFocus) {
             const int cursorX = qMin(textLeft + textW + preeditW + 1, textRight);
             const int cursorY = box.top() + (box.height() - cursorH) / 2;
-            p.fillRect(QRect(cursorX, cursorY, kCursorW, cursorH), CurrentPalette().inputText);
+            p.fillRect(QRect(cursorX, cursorY, CursorW(), cursorH), CurrentPalette().inputText);
         }
     } else if (cursorVisible && hasFocus) {
         const int cursorY = box.top() + (box.height() - cursorH) / 2;
-        p.fillRect(QRect(textLeft, cursorY, kCursorW, cursorH), CurrentPalette().inputText);
+        p.fillRect(QRect(textLeft, cursorY, CursorW(), cursorH), CurrentPalette().inputText);
     }
 
     // 3. iris.png 在输入框外侧右侧：距框右边框 20px、距窗口右边框 20px
-    const QRect iconRect(box.right() + kPadH,
+    const QRect iconRect(box.right() + PadH(),
                          box.top() + (box.height() - iconSize) / 2,
                          iconSize, iconSize);
     if (!icon_.isNull()) {

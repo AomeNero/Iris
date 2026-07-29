@@ -9,6 +9,7 @@
 #include <QVector>
 #include <QTimer>
 
+#include "core/DpiHelper.h"
 #include "provider/IProvider.h"
 #include "ui/SearchBar.h"
 #include "ui/ResultList.h"
@@ -78,11 +79,11 @@ private:
     int     imeEnglishRetry_ = 0;        // 确认循环已重试次数（达 kEnglishMaxRetry 停）
     int     imeEnglishStable_ = 0;       // 确认循环连续 OPEN=0 次数（达 kEnglishStableNeed 停）
 
-    static constexpr int kWindowWidth  = 1440;
-    static constexpr int kInputHeight   = SearchBar::kHeight;   // 100
-    static constexpr int kCornerRadius  = 16;
-    static constexpr int kShadowMargin  = 28;  // 内容内缩边距，为柔和外阴影留出边距带
-    static constexpr int kResizeBorder  = 8;
+    static int WindowWidth()  { return DpiHelper::Scale(1440); }
+    static int InputHeight()  { return DpiHelper::Scale(SearchBar::BaseHeight()); }
+    static int CornerRadius() { return DpiHelper::Scale(16); }
+    static int ShadowMargin() { return DpiHelper::Scale(28); }
+    static int ResizeBorder() { return DpiHelper::Scale(8); }
 };
 
 } // namespace iris

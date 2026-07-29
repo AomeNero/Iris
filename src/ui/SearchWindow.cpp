@@ -2,8 +2,12 @@
 #include "ui/SearchWindow.h"
 #include "ui/Theme.h"
 
+#include "core/DpiHelper.h"
+#include "core/Logger.h"
 #include "core/WinUtil.h"
 #include "core/StringUtil.h"
+
+#include <QDesktopWidget>
 
 #include <QPainter>
 #include <QPainterPath>
@@ -50,6 +54,20 @@ SearchWindow::SearchWindow(QWidget* parent) : QWidget(parent) {
     setAttribute(Qt::WA_TranslucentBackground);
     setAttribute(Qt::WA_InputMethodEnabled, true);  // 启用输入法，支持中文 IME 输入
 
+    // 调试：打印 DPI 缩放信息
+    QDesktopWidget* dt = QApplication::desktop();
+    if (dt) {
+        const int dpi = dt->logicalDpiX();
+        const int physW = dt->screenGeometry().width();
+        const float dpiScale = static_cast<float>(dpi) / 96.0f;
+        const int logicalW = static_cast<int>(physW / dpiScale);
+        IRIS_LOG_INFO(L"DPI=" + std::to_wstring(dpi) +
+                      L" physW=" + std::to_wstring(physW) +
+                      L" logicalW=" + std::to_wstring(logicalW) +
+                      L" scale=" + std::to_wstring(static_cast<int>(DpiHelper::ScaleFactor() * 100)) +
+                      L"% windowW=" + std::to_wstring(WindowWidth()));
+    }
+
     setMouseTracking(true);  // 悬停高亮需要无按钮鼠标移动事件
 
     connect(&cursorTimer_, &QTimer::timeout, this, [this]() {
@@ -69,29 +87,29 @@ SearchWindow::~SearchWindow() = default;
 
 void SearchWindow::RebuildLayout() {
     const int listH = resultList_.CalculateHeight();
-    setFixedSize(kWindowWidth + 2 * kShadowMargin,
-                 kInputHeight + listH + 2 * kShadowMargin);
+    setFixedSize(WindowWidth() + 2 * ShadowMargin(),
+                 InputHeight() + listH + 2 * ShadowMargin());
 }
 
 QRect SearchWindow::GetInputRect() const {
-    return QRect(kShadowMargin, kShadowMargin, kWindowWidth, kInputHeight);
+    return QRect(ShadowMargin(), ShadowMargin(), WindowWidth(), InputHeight());
 }
 QRect SearchWindow::GetListRect() const {
-    return QRect(kShadowMargin, kShadowMargin + kInputHeight,
-                 kWindowWidth, resultList_.CalculateHeight());
+    return QRect(ShadowMargin(), ShadowMargin() + InputHeight(),
+                 WindowWidth(), resultList_.CalculateHeight());
 }
 
 void SearchWindow::paintEvent(QPaintEvent*) {
     QPainter p(this);
     p.setRenderHint(QPainter::Antialiasing);
 
-    // 内容区（内缩 kShadowMargin，作为内容到窗口边的留白带）
-    const QRect content(kShadowMargin, kShadowMargin, kWindowWidth,
-                        height() - 2 * kShadowMargin);
+    // 内容区（内缩 ShadowMargin，作为内容到窗口边的留白带）
+    const QRect content(ShadowMargin(), ShadowMargin(), WindowWidth(),
+                        height() - 2 * ShadowMargin());
 
     // 裁剪到内容圆角区，后续绘制全部落在内容区内
     QPainterPath contentPath;
-    contentPath.addRoundedRect(content, kCornerRadius, kCornerRadius);
+    contentPath.addRoundedRect(content, CornerRadius(), CornerRadius());
     p.setClipPath(contentPath);
 
     // Layer 1: 灰基底 #e9e9e9（已移除原白底配套的顶部光泽——灰底上白光泽会把
@@ -111,7 +129,7 @@ void SearchWindow::paintEvent(QPaintEvent*) {
     borderPen.setWidthF(0.5);
     p.setPen(borderPen);
     p.setBrush(Qt::NoBrush);
-    p.drawRoundedRect(content.adjusted(0, 0, -1, -1), kCornerRadius, kCornerRadius);
+    p.drawRoundedRect(content.adjusted(0, 0, -1, -1), CornerRadius(), CornerRadius());
 }
 
 void SearchWindow::showWithFadeIn() {
@@ -435,9 +453,9 @@ void SearchWindow::mousePressEvent(QMouseEvent* event) {
         return;
     }
     if (event->button() != Qt::LeftButton) return;
-    const int y = event->pos().y() - kShadowMargin;
-    if (y >= kInputHeight) {
-        resultList_.SelectByY(y - kInputHeight);
+    const int y = event->pos().y() - ShadowMargin();
+    if (y >= InputHeight()) {
+        resultList_.SelectByY(y - InputHeight());
         update();
         OpenSelected();
     }
@@ -445,18 +463,18 @@ void SearchWindow::mousePressEvent(QMouseEvent* event) {
 
 void SearchWindow::mouseDoubleClickEvent(QMouseEvent* event) {
     if (event->button() != Qt::LeftButton) return;
-    const int y = event->pos().y() - kShadowMargin;
-    if (y >= kInputHeight) {
-        resultList_.SelectByY(y - kInputHeight);
+    const int y = event->pos().y() - ShadowMargin();
+    if (y >= InputHeight()) {
+        resultList_.SelectByY(y - InputHeight());
         OpenSelected();
     }
 }
 
 void SearchWindow::mouseMoveEvent(QMouseEvent* event) {
-    const int y = event->pos().y() - kShadowMargin;
+    const int y = event->pos().y() - ShadowMargin();
     // 悬停即选中（仅在列表区域内）；移出列表区不改变选中
-    if (y >= kInputHeight) {
-        if (resultList_.SetHoverByY(y - kInputHeight)) update();
+    if (y >= InputHeight()) {
+        if (resultList_.SetHoverByY(y - InputHeight())) update();
     }
 }
 
@@ -485,7 +503,7 @@ bool SearchWindow::nativeEvent(const QByteArray& /*type*/, void* message, long* 
 #ifdef Q_OS_WIN
     MSG* msg = static_cast<MSG*>(message);
     if (msg->message == WM_NCHITTEST) {
-        const LONG border = kResizeBorder;
+        const LONG border = ResizeBorder();
         RECT wr;
         GetWindowRect(HWND(winId()), &wr);
         const LONG x = GET_X_LPARAM(msg->lParam);
@@ -512,15 +530,15 @@ QVariant SearchWindow::inputMethodQuery(Qt::InputMethodQuery query) const {
     if (query == Qt::ImCursorRectangle) {
         const QFontMetrics fm(searchBar_.Font());
         const int textW = fm.horizontalAdvance(inputText_) + fm.horizontalAdvance(preeditText_);
-        // 与 SearchBar::Paint 一致：box 左/上/下缩进 kPadH，右缩进 (40+iconSize) 为 iris 让位
-        const int iconSize = kInputHeight - 2 * SearchBar::kPadH - 8;
-        const QRect box = GetInputRect().adjusted(SearchBar::kPadH, SearchBar::kPadH,
-                                                   -(40 + iconSize), -SearchBar::kPadH);
+        // 与 SearchBar::Paint 一致：box 左/上/下缩进 PadH，右缩进 (40+iconSize) 为 iris 让位
+        const int iconSize = InputHeight() - 2 * SearchBar::PadH() - 8;
+        const QRect box = GetInputRect().adjusted(SearchBar::PadH(), SearchBar::PadH(),
+                                                   -(40 + iconSize), -SearchBar::PadH());
         const int cursorH = box.height() - 16;
-        const int textRight = box.right() - SearchBar::kPadH;
-        const int x = qMin(box.left() + SearchBar::kPadH + textW, textRight);
+        const int textRight = box.right() - SearchBar::PadH();
+        const int x = qMin(box.left() + SearchBar::PadH() + textW, textRight);
         const int y = box.top() + (box.height() - cursorH) / 2;
-        return QRect(x, y, SearchBar::kCursorW, cursorH);
+        return QRect(x, y, SearchBar::CursorW(), cursorH);
     }
     return QWidget::inputMethodQuery(query);
 }
@@ -538,9 +556,9 @@ void SearchWindow::inputMethodEvent(QInputMethodEvent* e) {
 }
 
 void SearchWindow::contextMenuEvent(QContextMenuEvent* e) {
-    const int y = e->pos().y() - kShadowMargin;
-    if (y < kInputHeight) return;  // 输入框区不弹菜单
-    resultList_.SelectByY(y - kInputHeight);  // 右键选中该行（资源管理器习惯）
+    const int y = e->pos().y() - ShadowMargin();
+    if (y < InputHeight()) return;  // 输入框区不弹菜单
+    resultList_.SelectByY(y - InputHeight());  // 右键选中该行（资源管理器习惯）
     const ResultItem* item = resultList_.GetSelected();
     if (!item) return;
 

@@ -24,6 +24,7 @@
 #include "provider/AppProvider.h"
 #include "engine/SearchEngine.h"
 #include "core/Config.h"
+#include "core/DpiHelper.h"
 #include "core/HotkeySpec.h"
 #include "core/HistoryStore.h"
 #include "core/Logger.h"
@@ -85,6 +86,9 @@ int main(int argc, char* argv[]) {
     app.setApplicationName("Iris");
     app.setOrganizationName("IrisSearch");
     app.setQuitOnLastWindowClosed(false);  // 托盘驻留：QMessageBox 等关闭不退出，仅托盘"退出"菜单退出
+
+    // DPI 自动适配：检测主显示器 DPI 和逻辑分辨率，计算缩放因子
+    iris::DpiHelper::Init(app);
 
     // QVector<ResultItem> 跨线程 queued 传递需注册（engine 工作线程 → UI 线程）
     qRegisterMetaType<QVector<ResultItem>>("QVector<ResultItem>");

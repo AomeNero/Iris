@@ -6,6 +6,8 @@
 #include <QFont>
 #include <QPixmap>
 
+#include "core/DpiHelper.h"
+
 class QPainter;
 class QRect;
 
@@ -21,14 +23,15 @@ public:
 
     const QFont& Font() const { return font_; }
 
-    static constexpr int kHeight    = 140;  // 输入栏区域高度
-    static constexpr int kPadH      = 20;
-    static constexpr int kCursorW   = 2;
-    static constexpr int kCursorH   = 85;   // 规格指定的高光标
-    static constexpr int kIconSize  = 84;   // iris.png（规格 110，钳制到 100px 栏内 84）
+    static int BaseHeight() { return 140; }  // 基准值（不缩放，供 DpiHelper 引用）
+    static int Height()    { return DpiHelper::Scale(140); }  // 输入栏区域高度
+    static int PadH()      { return DpiHelper::Scale(20); }
+    static int CursorW()   { return DpiHelper::Scale(2); }
+    static int CursorH()   { return DpiHelper::Scale(85); }   // 规格指定的高光标
+    static int IconSize()  { return DpiHelper::Scale(84); }   // iris.png（规格 110，钳制到 100px 栏内 84）
 
 private:
-    QFont   font_{"Microsoft YaHei", 26};
+    QFont   font_{"Microsoft YaHei", DpiHelper::ScaleFont(26)};
     QPixmap icon_;  // 右侧 iris.png（无效时回退圆角方块）
 };
 

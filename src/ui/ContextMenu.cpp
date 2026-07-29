@@ -19,7 +19,7 @@ ContextMenu::ContextMenu(QWidget* parent) : QWidget(parent) {
     setAttribute(Qt::WA_TranslucentBackground);
     setMouseTracking(true);  // 悬停高亮
     setFocusPolicy(Qt::StrongFocus);
-    QFont f("Microsoft YaHei", 12);
+    QFont f("Microsoft YaHei", DpiHelper::ScaleFont(12));
     setFont(f);
 }
 
@@ -33,7 +33,7 @@ void ContextMenu::popup(const QPoint& globalPos) {
     int maxTextW = 0;
     for (const auto& it : items_)
         maxTextW = std::max(maxTextW, fm.horizontalAdvance(it.label));
-    setFixedSize(maxTextW + 2 * kPadH, static_cast<int>(items_.size()) * kRowH + 2 * kPadV);
+    setFixedSize(maxTextW + 2 * PadH(), static_cast<int>(items_.size()) * RowH() + 2 * PadV());
     selectedIndex_ = items_.isEmpty() ? -1 : 0;
     move(globalPos);
     show();
@@ -42,7 +42,7 @@ void ContextMenu::popup(const QPoint& globalPos) {
 
 int ContextMenu::rowAt(int y) const {
     if (items_.isEmpty()) return -1;
-    const int i = (y - kPadV) / kRowH;
+    const int i = (y - PadV()) / RowH();
     return (i >= 0 && i < items_.size()) ? i : -1;
 }
 
@@ -53,7 +53,7 @@ void ContextMenu::paintEvent(QPaintEvent*) {
     // 圆角路径：背景与边框共用同一路径，半像素居中使抗锯齿锐利；圆角外保持透明（无白色尖角）
     const QRectF r = QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5);
     QPainterPath path;
-    path.addRoundedRect(r, kRadius, kRadius);
+    path.addRoundedRect(r, Radius(), Radius());
 
     // 背景：fillPath 只填圆角内，圆角外不绘制（透明）
     p.fillPath(path, CurrentPalette().inputBg);
@@ -62,13 +62,13 @@ void ContextMenu::paintEvent(QPaintEvent*) {
     p.setClipPath(path);
     const QRect bounds = rect();
     if (selectedIndex_ >= 0 && selectedIndex_ < items_.size()) {
-        const QRect selRect(0, kPadV + selectedIndex_ * kRowH, bounds.width(), kRowH);
+        const QRect selRect(0, PadV() + selectedIndex_ * RowH(), bounds.width(), RowH());
         p.fillRect(selRect, CurrentPalette().base);  // 选中（灰，区别白底）
     }
     p.setPen(CurrentPalette().inputText);
     const QFontMetrics fm(font());
     for (int i = 0; i < items_.size(); ++i) {
-        const QRect textRect(kPadH, kPadV + i * kRowH, bounds.width() - 2 * kPadH, kRowH);
+        const QRect textRect(PadH(), PadV() + i * RowH(), bounds.width() - 2 * PadH(), RowH());
         p.drawText(textRect, Qt::AlignLeft | Qt::AlignVCenter, items_[i].label);
     }
 

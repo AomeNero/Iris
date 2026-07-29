@@ -256,7 +256,7 @@ bool ResultListView::SetHoverByY(int y) {
 
 int ResultListView::CalculateHeight() const {
     if (results_.isEmpty()) return 0;  // 空列表不占位（窗口只保留输入框）
-    return RowsThisPage() * kRowHSelected + 18;  // 末页随实际行数缩短；末行与内容区底边留 18px
+    return RowsThisPage() * RowHSelected() + 18;  // 末页随实际行数缩短；末行与内容区底边留 18px
 }
 
 void ResultListView::DrawGlobe(QPainter& p, const QRect& r, const QColor& color) {
@@ -282,15 +282,15 @@ void ResultListView::DrawGlobe(QPainter& p, const QRect& r, const QColor& color)
 void ResultListView::DrawEnterAction(QPainter& p, const QRect& r) {
     const QPixmap& pix = EnterPixWhite();
     if (pix.isNull()) return;
-    const int sz = 30;  // 30x30，行内垂直居中，距右边框 70px
-    const QRect er(r.right() - 70 - sz, r.top() + (r.height() - sz) / 2, sz, sz);
+    const int sz = DpiHelper::Scale(30);  // 30x30，行内垂直居中，距右边框 70px
+    const QRect er(r.right() - DpiHelper::Scale(70) - sz, r.top() + (r.height() - sz) / 2, sz, sz);
     p.drawPixmap(er, pix);
 }
 
 void ResultListView::DrawShortcut(QPainter& p, const QRect& r, int visibleNo) {
     if (visibleNo < 1 || visibleNo > 9) return;
     // 纯字符 "ctrlN"（如 ctrl1、ctrl2），距右边框 40px
-    QFont f("Microsoft YaHei", 16);
+    QFont f("Microsoft YaHei", DpiHelper::ScaleFont(16));
     p.setFont(f);
     p.setPen(CurrentPalette().hotkey);
     const QString text = QString::fromUtf8("ctrl") + QString::number(visibleNo);
@@ -304,8 +304,8 @@ void ResultListView::PaintRow(QPainter& p, int rowIdx, const QRect& r) {
     const ResultItem& item = results_[rowIdx];
     const bool selected = (rowIdx == selectedIndex_);
     const Palette& pal = CurrentPalette();
-    const int padH = 18;
-    const int iconSize = 60;  // 选中/未选中统一图标大小
+    const int padH = DpiHelper::Scale(18);
+    const int iconSize = DpiHelper::Scale(60);  // 选中/未选中统一图标大小
 
     // 行背景：左右各 18px(padH) 间距、12px 圆角的圆角矩形
     // 选中=皇家紫；常态=基底色（悬停即选中，无独立悬停态）
@@ -336,7 +336,7 @@ void ResultListView::PaintRow(QPainter& p, int rowIdx, const QRect& r) {
             p.setBrush(selected ? pal.iconFallbackSel : pal.iconFallback);
             p.drawRoundedRect(iconRect, 10, 10);
             p.setPen(selected ? pal.selectedFg : pal.textSecondary);
-            QFont f("Microsoft YaHei", 20); f.setBold(true);
+            QFont f("Microsoft YaHei", DpiHelper::ScaleFont(20)); f.setBold(true);
             p.setFont(f);
             p.drawText(iconRect, Qt::AlignCenter, titleQ.left(1).toUpper());
         }
@@ -346,8 +346,8 @@ void ResultListView::PaintRow(QPainter& p, int rowIdx, const QRect& r) {
     const int textX = iconRect.right() + 16;
     const int textW = r.right() - padH - textX - 96;
 
-    static const QFont kTitleFont = []() { QFont f("Microsoft YaHei", 16); f.setBold(true); return f; }();
-    static const QFont kSubFont("Microsoft YaHei", 12);
+    static const QFont kTitleFont = []() { QFont f("Microsoft YaHei", DpiHelper::ScaleFont(16)); f.setBold(true); return f; }();
+    static const QFont kSubFont("Microsoft YaHei", DpiHelper::ScaleFont(12));
 
     const QFontMetrics tm(kTitleFont);
     const QFontMetrics sm(kSubFont);
