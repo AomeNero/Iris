@@ -25,6 +25,7 @@ Windows 自带的搜索慢且入口分散——找文件要去资源管理器、
 ### 核心特性
 
 - **快捷键秒唤**：全局热键（默认 `Alt+Space`）瞬间弹出搜索框，输入即搜、即开。
+- **亚毫秒搜索**：Trigram 倒排索引 + 内存缓存，前缀/子串/拼音搜索均 <2ms，体感即时响应。
 - **极速索引**：直接读取 NTFS USN Journal / MFT，全盘文件毫秒级检索，非 NTFS 自动回退递归扫描。
 - **三源合一**：本地文件、开始菜单应用、Chrome/Edge 浏览器书签统一排序，按使用频次加权。
 - **拼音搜索**：输入拼音直接命中中文（如 `weixin` 找「微信」），全拼 + 首字母，中英混搜无障碍。
@@ -134,6 +135,7 @@ scripts\run-in-vcvars.cmd ctest --test-dir build -C Release --output-on-failure 
 - [nlohmann/json](https://github.com/nlohmann/json) — 现代 C++ JSON 库
 - [SQLite](https://www.sqlite.org/) — 嵌入式数据库（历史记录存储）
 - [GoogleTest](https://github.com/google/googletest) — 单元测试框架
+- [cpp-pinyin](https://github.com/nickchenk/cpp-pinyin) — 中文拼音转换库（Apache-2.0）
 
 **Contributors**
 

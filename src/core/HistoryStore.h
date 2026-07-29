@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <mutex>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 struct sqlite3;
@@ -27,7 +28,10 @@ public:
     /// 记录一次打开（upsert：已存在则 open_count+1，否则插入）
     void RecordOpen(const ResultItem& item);
 
-    /// 获取单个路径的打开次数（Ranker 按需调用）
+    /// 预热缓存：启动时调用，加载所有 openCount 到内存（后续 GetOpenCount 走缓存）
+    void WarmCache();
+
+    /// 获取单个路径的打开次数（Ranker 按需调用；WarmCache 后走内存缓存）
     int GetOpenCount(const std::wstring& path) const;
 
     /// 最近使用的 N 条记录（用于弹出时显示）
@@ -41,6 +45,8 @@ public:
 private:
     sqlite3*      db_ = nullptr;
     mutable std::mutex mutex_;
+    std::unordered_map<std::wstring, int> cache_;  // 内存缓存（WarmCache 后生效）
+    bool cacheWarmed_ = false;
 };
 
 } // namespace iris

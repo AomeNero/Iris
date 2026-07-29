@@ -69,6 +69,7 @@ public:
     std::wstring GetPinyinInitials(size_t i) const override { return entries_[i].pinyinInitials; }
     iris::ItemType GetType(size_t i) const override { return entries_[i].type; }
     uint8_t GetPathDepth(size_t i) const override { return entries_[i].depth; }
+    std::wstring GetPath(size_t i) const override { return entries_[i].path; }
 
 private:
     std::vector<Entry> entries_;

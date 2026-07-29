@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "provider/IProvider.h"
+#include "provider/TrigramIndex.h"
 
 namespace iris {
 
@@ -118,6 +119,10 @@ public:
     StringPool& NamePool() { return namePool_; }
     StringPool& DirPool() { return dirPool_; }
 
+    // Trigram 倒排索引（Sort 后调用 BuildTrigramIndex）
+    void BuildTrigramIndex() { trigramIndex_.Build(*this); }
+    const TrigramIndex& GetTrigramIndex() const { return trigramIndex_; }
+
     // 重建 ResultItem（文件语义：title=文件名，subtitle=目录路径，path=完整路径）
     // 书签/应用由各自 Provider 的 BuildResultItem 定制，可不复用此实现。
     ResultItem ToResultItem(const CompactFileEntry& e) const {
@@ -138,7 +143,8 @@ public:
     size_t TotalMemoryBytes() const {
         return entries_.capacity() * sizeof(CompactFileEntry)
              + dirs_.capacity() * sizeof(DirEntry)
-             + namePool_.SizeInBytes() + dirPool_.SizeInBytes();
+             + namePool_.SizeInBytes() + dirPool_.SizeInBytes()
+             + trigramIndex_.MemoryBytes();
     }
 
 private:
@@ -146,6 +152,7 @@ private:
     std::vector<DirEntry>         dirs_;
     StringPool                    namePool_;
     StringPool                    dirPool_;
+    TrigramIndex                  trigramIndex_;
 };
 
 } // namespace iris

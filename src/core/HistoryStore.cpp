@@ -46,6 +46,22 @@ HistoryStore::~HistoryStore() {
     if (db_) sqlite3_close(db_);
 }
 
+void HistoryStore::WarmCache() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!db_ || cacheWarmed_) return;
+    cache_.clear();
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(db_, "SELECT path, open_count FROM history", -1,
+                           &stmt, nullptr) != SQLITE_OK) return;
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        const char* path = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
+        const int count = sqlite3_column_int(stmt, 1);
+        if (path) cache_[StringUtil::Utf8ToWide(path)] = count;
+    }
+    sqlite3_finalize(stmt);
+    cacheWarmed_ = true;
+}
+
 void HistoryStore::RecordOpen(const ResultItem& item) {
     std::lock_guard<std::mutex> lock(mutex_);
     if (!db_) return;
@@ -69,11 +85,27 @@ void HistoryStore::RecordOpen(const ResultItem& item) {
     sqlite3_bind_int64(stmt, 7, now);
     sqlite3_step(stmt);
     sqlite3_finalize(stmt);
+
+    // 同步更新缓存
+    if (cacheWarmed_) {
+        auto it = cache_.find(item.path);
+        if (it != cache_.end()) {
+            it->second += 1;
+        } else {
+            cache_[item.path] = 1;
+        }
+    }
 }
 
 int HistoryStore::GetOpenCount(const std::wstring& path) const {
     std::lock_guard<std::mutex> lock(mutex_);
     if (!db_) return 0;
+    // 缓存命中：WarmCache 后走内存，~0.001ms
+    if (cacheWarmed_) {
+        auto it = cache_.find(path);
+        return (it != cache_.end()) ? it->second : 0;
+    }
+    // 缓存未预热：走 SQLite（兼容未调 WarmCache 的场景）
     const std::string utf8Path = StringUtil::WideToUtf8(path);
     sqlite3_stmt* stmt = nullptr;
     int count = 0;

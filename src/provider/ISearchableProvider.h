@@ -14,6 +14,8 @@
 
 namespace iris {
 
+class TrigramIndex;
+
 class ISearchableProvider : public IProvider {
 public:
     ~ISearchableProvider() override = default;
@@ -35,6 +37,12 @@ public:
     /// 元数据访问（Ranker 排序时按需调用）
     virtual ItemType GetType(size_t index) const = 0;
     virtual uint8_t  GetPathDepth(size_t index) const = 0;
+
+    /// 获取完整路径（精排 GetOpenCount 用，比 BuildResultItem 更轻量）
+    virtual std::wstring GetPath(size_t index) const = 0;
+
+    /// 获取 Trigram 倒排索引（子串搜索用；默认返回 nullptr 表示不支持）
+    virtual const TrigramIndex* GetTrigramIndex() const { return nullptr; }
 };
 
 } // namespace iris

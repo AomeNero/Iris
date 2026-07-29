@@ -59,6 +59,7 @@ public:
     std::wstring GetPinyinInitials(size_t index) const override;
     ItemType GetType(size_t index) const override;
     uint8_t GetPathDepth(size_t index) const override;
+    std::wstring GetPath(size_t index) const override;
 
 private:
     // CoW：Snapshot 拷贝 shared_ptr（加锁仅保护指针交换，读无锁）

@@ -93,6 +93,7 @@ int main(int argc, char* argv[]) {
     const std::filesystem::path exeDir(iris::WinUtil::GetExeDir());
     iris::Logger::Init(exeDir / L"log");   // 日志进 exe 同级 log/（Logger 内部自动建目录）
     HistoryStore history(exeDir / L"Iris.db");
+    history.WarmCache();  // 预热历史缓存，搜索时 GetOpenCount 走内存
 
     // ── 配置：读 config.json（不存在则用默认值并落盘，供托盘“设置”编辑）──
     auto cfg = Config::Instance().Load();

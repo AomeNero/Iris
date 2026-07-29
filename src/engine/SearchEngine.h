@@ -3,16 +3,18 @@
 #pragma once
 
 #include <atomic>
+#include <condition_variable>
 #include <memory>
 #include <mutex>
+#include <queue>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <QObject>
 #include <QVector>
 
 #include "core/HistoryStore.h"
-#include "core/ThreadPool.h"
 #include "engine/Matcher.h"
 #include "engine/QueryParser.h"
 #include "engine/Ranker.h"
@@ -65,7 +67,15 @@ private:
     std::shared_ptr<std::atomic<bool>> cancelFlag_;
     std::mutex                          cancelMutex_;
     std::atomic<int>                    nextRequestId_{0};
-    ThreadPool                          threadPool_{4};
+
+    // 专用搜索线程（替代 ThreadPool，唤醒延迟 ~0.05ms）
+    std::thread              searchThread_;
+    std::queue<std::shared_ptr<SearchContext>> requestQueue_;
+    std::mutex               queueMutex_;
+    std::condition_variable  queueCv_;
+    std::atomic<bool>        stopThread_{false};
+
+    void SearchThreadLoop();
 };
 
 } // namespace iris

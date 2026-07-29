@@ -7,10 +7,17 @@ namespace iris {
 
 SearchEngine::SearchEngine(QObject* parent) : QObject(parent) {
     cancelFlag_ = std::make_shared<std::atomic<bool>>(false);
+    searchThread_ = std::thread([this]() { SearchThreadLoop(); });
 }
 
 SearchEngine::~SearchEngine() {
     CancelSearch();
+    {
+        std::lock_guard<std::mutex> lock(queueMutex_);
+        stopThread_ = true;
+    }
+    queueCv_.notify_one();
+    if (searchThread_.joinable()) searchThread_.join();
 }
 
 void SearchEngine::SetProviders(std::shared_ptr<ISearchableProvider> file,
@@ -41,8 +48,12 @@ int SearchEngine::SearchAsync(const std::wstring& rawText) {
         ctx->cancelled = cancelFlag_;
     }
 
-    // 值捕获 shared_ptr，跨线程安全；禁止 [&]
-    threadPool_.Enqueue([this, ctx]() { DoSearch(ctx); });
+    // 推入队列，唤醒专用搜索线程（~0.05ms 唤醒延迟）
+    {
+        std::lock_guard<std::mutex> lock(queueMutex_);
+        requestQueue_.push(ctx);
+    }
+    queueCv_.notify_one();
     return id;
 }
 
@@ -92,6 +103,22 @@ void SearchEngine::DoSearch(std::shared_ptr<SearchContext> ctx) {
         qresults.append(std::move(r));
 
     emit searchFinished(qresults);
+}
+
+void SearchEngine::SearchThreadLoop() {
+    while (true) {
+        std::shared_ptr<SearchContext> ctx;
+        {
+            std::unique_lock<std::mutex> lock(queueMutex_);
+            queueCv_.wait(lock, [this]() {
+                return stopThread_.load() || !requestQueue_.empty();
+            });
+            if (stopThread_.load() && requestQueue_.empty()) return;
+            ctx = std::move(requestQueue_.front());
+            requestQueue_.pop();
+        }
+        DoSearch(ctx);
+    }
 }
 
 } // namespace iris

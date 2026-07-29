@@ -154,6 +154,7 @@ bool FileProvider::Initialize() {
         return false;  // 扫描中途被取消，不发布半成品索引
     }
     store->Sort();
+    store->BuildTrigramIndex();  // 构建 trigram 倒排索引（子串搜索用）
     files = store->size();
 
     ReplaceIndex(std::const_pointer_cast<const IndexStore>(store));
@@ -416,6 +417,26 @@ uint8_t FileProvider::GetPathDepth(size_t index) const {
     auto s = Snapshot();
     if (!s || index >= s->size()) return 0;
     return (*s)[index].pathDepth;
+}
+
+std::wstring FileProvider::GetPath(size_t index) const {
+    auto s = Snapshot();
+    if (!s || index >= s->size()) return {};
+    const auto& e = (*s)[index];
+    auto dir = s->DirOf(e);
+    auto name = s->NameAt(e);
+    std::wstring path;
+    path.reserve(dir.size() + 1 + name.size());
+    path.assign(dir);
+    if (!path.empty() && path.back() != L'\\' && path.back() != L'/')
+        path += L'\\';
+    path.append(name);
+    return path;
+}
+
+const TrigramIndex* FileProvider::GetTrigramIndex() const {
+    auto s = Snapshot();
+    return s ? &s->GetTrigramIndex() : nullptr;
 }
 
 // ============================================================================

@@ -51,6 +51,7 @@ public:
     std::wstring GetPinyinInitials(size_t index) const override;
     ItemType GetType(size_t index) const override;
     uint8_t GetPathDepth(size_t index) const override;
+    std::wstring GetPath(size_t index) const override;
 
     // 按应用名（CI）去重，保留先出现（开始菜单优先于桌面）。纯函数，供测试。
     static void DeduplicateByName(std::vector<Entry>& entries);

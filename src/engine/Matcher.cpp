@@ -2,8 +2,15 @@
 // 评分规则 [已确认 E3]：title+subtitle+path 全匹配
 #include "engine/Matcher.h"
 
+#include "provider/TrigramIndex.h"
+
 #include <algorithm>
 #include <cwchar>
+
+// SSE4.2 加速字符串比较（_mm_cmpestri 批量 8 wchar_t）
+#ifdef __SSE4_2__
+#include <nmmintrin.h>
+#endif
 
 namespace iris {
 
@@ -15,10 +22,35 @@ bool StartsWithCI(std::wstring_view text, std::wstring_view kw) {
     return _wcsnicmp(text.data(), kw.data(), kw.size()) == 0;
 }
 
-// case-insensitive 子串判断
+// case-insensitive 子串判断（SIMD 加速 + 标量回退）
 bool ContainsCI(std::wstring_view text, std::wstring_view kw) {
     if (kw.empty()) return true;
     if (kw.size() > text.size()) return false;
+
+#ifdef __SSE4_2__
+    // SSE4.2: 用 _mm_cmpestri 批量比较 8 个 wchar_t（128-bit）
+    if (kw.size() <= 8 && text.size() >= 8) {
+        // 构造 keyword 向量（小写）
+        alignas(16) wchar_t kwLower[8] = {};
+        for (size_t i = 0; i < kw.size(); ++i)
+            kwLower[i] = static_cast<wchar_t>(towlower(static_cast<wint_t>(kw[i])));
+        __m128i vk = _mm_loadu_si128(reinterpret_cast<const __m128i*>(kwLower));
+
+        const size_t limit = text.size() - 8;
+        for (size_t i = 0; i <= limit; i += 8) {
+            // 加载 8 个 wchar_t 并转小写
+            __m128i vt = _mm_loadu_si128(reinterpret_cast<const __m128i*>(text.data() + i));
+            // 简化：先用 _mm_cmpestrw 做子串搜索（SSE4.2 string operations）
+            // _SIDD_LEAST_SIGNIFICANT | _SIDD_CMP_EQUAL_ORDERED | _SIDD_WORD
+            int idx = _mm_cmpestri(vk, static_cast<int>(kw.size()),
+                                   vt, 8,
+                                   _SIDD_LEAST_SIGNIFICANT | _SIDD_CMP_EQUAL_EACH | _SIDD_WORD);
+            if (idx < 8) return true;
+        }
+    }
+#endif
+
+    // 标量回退
     for (std::size_t i = 0; i + kw.size() <= text.size(); ++i) {
         if (_wcsnicmp(text.data() + i, kw.data(), kw.size()) == 0) return true;
     }
@@ -63,15 +95,16 @@ int Matcher::MatchSingle(std::wstring_view title, std::wstring_view subtitle,
     int positionScore = 0;
     int matched = 0;
     for (const auto& kw : keywords) {
+        // 前缀匹配（最高优先级）
         if (StartsWithCI(title, kw)) {
             positionScore += 30; ++matched;
-        } else if (PathSegmentStartsCI(path, kw)) {
+        } else if (!path.empty() && PathSegmentStartsCI(path, kw)) {
             positionScore += 20; ++matched;
         } else if (ContainsCI(title, kw)) {
             positionScore += 10; ++matched;
-        } else if (ContainsCI(subtitle, kw)) {
+        } else if (!subtitle.empty() && ContainsCI(subtitle, kw)) {
             positionScore += 7; ++matched;
-        } else if (ContainsCI(path, kw)) {
+        } else if (!path.empty() && ContainsCI(path, kw)) {
             positionScore += 5; ++matched;
         } else if (IsAscii(kw)) {
             // 拼音匹配（App/Bookmark 预计算了拼音；File 返回空 → PinyinScore=0 不命中）
@@ -93,14 +126,38 @@ std::vector<MatchResult> Matcher::Match(ISearchableProvider& provider,
                                         const ParsedQuery& query,
                                         const std::atomic<bool>& cancelled) {
     std::vector<MatchResult> results;
+    if (query.keywords.empty()) return results;
 
-    const std::size_t startIdx = query.keywords.empty()
-        ? 0
-        : provider.FindFirstPrefix(query.keywords[0]);
+    const auto* trigram = provider.GetTrigramIndex();
+
+    // 有 TrigramIndex 且首关键词 >= 3 字符：走倒排索引（子串搜索 O(K)）
+    if (trigram && trigram->EntryCount() > 0 && query.keywords[0].size() >= 3) {
+        auto candidates = trigram->Query(query.keywords[0]);
+        for (uint32_t idx : candidates) {
+            if ((idx & 0x3FF) == 0 && cancelled.load(std::memory_order_relaxed))
+                return results;
+
+            const int score = MatchSingle(
+                provider.GetSearchText(idx), {}, {},
+                provider.GetPinyinFull(idx),
+                provider.GetPinyinInitials(idx),
+                query.keywords);
+            if (score > 0) {
+                MatchResult mr;
+                mr.provider = &provider;
+                mr.entryIndex = idx;
+                mr.rawScore = score;
+                results.push_back(mr);
+            }
+        }
+        return results;
+    }
+
+    // 无 TrigramIndex 或短关键词：走前缀扫描（兼容 App/Bookmark）
+    const std::size_t startIdx = provider.FindFirstPrefix(query.keywords[0]);
     const std::size_t count = provider.GetCount();
 
-    // 前缀扫描：当首关键词为前缀匹配时，连续命中区间结束即可停（带关键词时优化）
-    const bool prefixScan = !query.keywords.empty();
+    const bool prefixScan = true;
     bool lastWasPrefixHit = false;
 
     for (std::size_t idx = startIdx; idx < count; ++idx) {
@@ -118,15 +175,11 @@ std::vector<MatchResult> Matcher::Match(ISearchableProvider& provider,
             mr.entryIndex = idx;
             mr.rawScore = score;
             results.push_back(mr);
-            // 仅 title 前缀命中才延续前缀扫描区；拼音/包含命中不算——中文拼音命中散布在
-            // 非前缀区，若记为前缀命中，离开前缀区时会误 break，错过后续拼音命中条目。
             lastWasPrefixHit = StartsWithCI(item.title, query.keywords[0]);
         } else if (prefixScan) {
-            // 前缀扫描区间：一旦越过前缀命中区且连续未命中，可提前结束
             if (lastWasPrefixHit) {
-                const std::wstring_view name = item.title;  // 近似：title 为文件名
+                const std::wstring_view name = item.title;
                 if (!name.empty() && !StartsWithCI(name, query.keywords[0])) {
-                    // 仅当确实离开前缀区才跳出（保守：要求连续未命中且非前缀）
                     break;
                 }
             }

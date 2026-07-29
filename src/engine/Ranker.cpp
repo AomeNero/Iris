@@ -63,8 +63,9 @@ std::vector<ResultItem> Ranker::Rank(std::vector<MatchResult>& matches,
         const uint8_t depth = m.provider->GetPathDepth(m.entryIndex);
         int historyScore = 0;
         if (history) {
-            const ResultItem ri = m.provider->BuildResultItem(m.entryIndex);
-            historyScore = HistoryScore(history->GetOpenCount(ri.path));
+            // 用 GetPath 代替 BuildResultItem（省去 title/subtitle 构建开销）
+            historyScore = HistoryScore(history->GetOpenCount(
+                m.provider->GetPath(m.entryIndex)));
         }
         fine.push_back({&m, static_cast<int>(
             m.rawScore            * relevanceWeight +
@@ -75,6 +76,7 @@ std::vector<ResultItem> Ranker::Rank(std::vector<MatchResult>& matches,
     std::sort(fine.begin(), fine.end(),
               [](const Fine& a, const Fine& b) { return a.score > b.score; });
 
+    // 最终：只对 Top N 构建完整 ResultItem
     const int n = std::min(static_cast<int>(fine.size()), maxResults);
     std::vector<ResultItem> out;
     out.reserve(n);

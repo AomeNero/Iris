@@ -55,6 +55,7 @@ add_iris_test(test_file_provider
     ${SRC}/provider/ISearchableProvider.h
     ${SRC}/provider/FileProvider.h
     ${SRC}/provider/FileProvider.cpp
+    ${SRC}/provider/TrigramIndex.cpp
     ${SRC}/core/StringUtil.cpp
     ${SRC}/core/Logger.cpp
     ${SRC}/core/WinUtil.cpp
@@ -71,6 +72,7 @@ add_iris_test(test_matcher
     mock_provider.h
     ${SRC}/provider/IProvider.h
     ${SRC}/provider/ISearchableProvider.h
+    ${SRC}/provider/TrigramIndex.cpp
     ${SRC}/engine/Matcher.cpp)
 
 add_iris_test(test_ranker
@@ -78,6 +80,7 @@ add_iris_test(test_ranker
     mock_provider.h
     ${SRC}/provider/IProvider.h
     ${SRC}/provider/ISearchableProvider.h
+    ${SRC}/provider/TrigramIndex.cpp
     ${SRC}/engine/Matcher.cpp
     ${SRC}/engine/Ranker.cpp
     ${SRC}/core/HistoryStore.cpp
@@ -90,6 +93,7 @@ add_iris_test(test_search_engine NOMAIN
     mock_provider.h
     ${SRC}/provider/IProvider.h
     ${SRC}/provider/ISearchableProvider.h
+    ${SRC}/provider/TrigramIndex.cpp
     ${SRC}/engine/SearchEngine.h
     ${SRC}/engine/SearchEngine.cpp
     ${SRC}/engine/QueryParser.cpp

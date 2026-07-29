@@ -239,4 +239,10 @@ uint8_t AppProvider::GetPathDepth(size_t /*index*/) const {
     return 0;
 }
 
+std::wstring AppProvider::GetPath(size_t index) const {
+    const auto e = Snapshot();
+    if (!e || index >= e->size()) return {};
+    return (*e)[index].targetPath;
+}
+
 } // namespace iris

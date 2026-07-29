@@ -257,4 +257,10 @@ uint8_t BookmarkProvider::GetPathDepth(size_t index) const {
     return (*e)[index].depth;
 }
 
+std::wstring BookmarkProvider::GetPath(size_t index) const {
+    const auto e = Snapshot();
+    if (!e || index >= e->size()) return {};
+    return (*e)[index].url;
+}
+
 } // namespace iris

@@ -46,6 +46,8 @@ public:
     std::wstring GetSearchText(size_t index) const override;
     ItemType    GetType(size_t index) const override;
     uint8_t     GetPathDepth(size_t index) const override;
+    std::wstring GetPath(size_t index) const override;
+    const TrigramIndex* GetTrigramIndex() const override;
 
     // ---- 排除规则（纯函数，供测试）----
     // fileAttributes: USN_RECORD 的 FileAttributes；不调 GetFileAttributesW。
