@@ -15,6 +15,7 @@ SearchBar::SearchBar() {
 void SearchBar::Paint(QPainter& p, const QRect& rect, const QString& text, const QString& preedit,
                       bool cursorVisible, bool hasFocus) {
     p.setRenderHint(QPainter::Antialiasing);
+    p.setRenderHint(QPainter::SmoothPixmapTransform);  // iris.png 大图缩绘制，平滑插值防锯齿
 
     // iris 图标尺寸（随输入框高度自适应）
     const int iconSize = rect.height() - 2 * PadH() - 8;
