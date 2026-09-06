@@ -52,6 +52,13 @@ scripts\run-in-vcvars.cmd ctest --test-dir build -C Release --output-on-failure
 .\build\Release\Iris.exe
 ```
 
+> ⚠️ 替换 `resources/iris.ico`（exe/托盘图标）或 `resources/iris.png`（搜索框 logo）后，仅覆盖文件再构建是**无效的**——MSBuild 不追踪 `.rc` 内引用的 `.ico`，AUTORCC 对 qrc 内 `.png` 的时间戳追踪也不可靠，exe 里会仍是旧图。请在构建前刷新两个宿主文件的时间戳：
+>
+> ```powershell
+> (Get-Item resources\resources.qrc).LastWriteTime = Get-Date
+> (Get-Item resources\iris.rc).LastWriteTime = (Get-Date).AddMilliseconds(1500)
+> ```
+
 > 💡 `cl.exe` 不在 PATH 时，所有需要 MSVC 的命令都通过 `scripts\` 下的 `.cmd` 包装器自动加载 vcvars。**这些 `.cmd` 必须保持纯 ASCII**（中文系统下 cmd.exe 按 GBK 解析 `.bat`，含中文/UTF-8 注释会导致乱码与死循环）。
 
 ## 代码规范
