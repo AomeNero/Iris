@@ -11,10 +11,9 @@
 #include <string_view>
 
 #include "provider/IProvider.h"
+#include "provider/TrigramIndex.h"  // SearchTrigram 默认实现需完整类型
 
 namespace iris {
-
-class TrigramIndex;
 
 class ISearchableProvider : public IProvider {
 public:
@@ -43,6 +42,15 @@ public:
 
     /// 获取 Trigram 倒排索引（子串搜索用；默认返回 nullptr 表示不支持）
     virtual const TrigramIndex* GetTrigramIndex() const { return nullptr; }
+
+    /// Trigram 子串搜索：返回候选 entry 索引（必要条件集）。
+    /// 支持实时增量的实现覆写此方法以合并 delta 候选（Matcher 经此搜索，
+    /// 门控仍走 GetTrigramIndex 判空）。默认：对 GetTrigramIndex 直接 Query。
+    virtual std::vector<uint32_t> SearchTrigram(std::wstring_view pattern) const {
+        const auto* t = GetTrigramIndex();
+        if (!t || t->EntryCount() == 0) return {};
+        return t->Query(pattern);
+    }
 };
 
 } // namespace iris

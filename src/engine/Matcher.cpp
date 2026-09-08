@@ -132,7 +132,7 @@ std::vector<MatchResult> Matcher::Match(ISearchableProvider& provider,
 
     // 有 TrigramIndex 且首关键词 >= 3 字符：走倒排索引（子串搜索 O(K)）
     if (trigram && trigram->EntryCount() > 0 && query.keywords[0].size() >= 3) {
-        auto candidates = trigram->Query(query.keywords[0]);
+        auto candidates = provider.SearchTrigram(query.keywords[0]);  // 含 delta 增量合并
         for (uint32_t idx : candidates) {
             if ((idx & 0x3FF) == 0 && cancelled.load(std::memory_order_relaxed))
                 return results;

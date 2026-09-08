@@ -8,6 +8,7 @@
 #include <windows.h>
 
 #include "provider/ISearchableProvider.h"
+#include "provider/IndexStore.h"
 
 class MockProvider : public iris::ISearchableProvider {
 public:
@@ -22,13 +23,15 @@ public:
     };
     using Entries = std::vector<Entry>;
 
-    explicit MockProvider(std::vector<Entry> entries, bool readyFlag = true)
+    explicit MockProvider(std::vector<Entry> entries, bool readyFlag = true,
+                          bool buildTrigram = false)
         : entries_(std::move(entries)), ready_(readyFlag) {
         // 按 title 字典序排序（使 FindFirstPrefix 与 Matcher 前缀扫描正确）
         std::sort(entries_.begin(), entries_.end(),
                   [](const Entry& a, const Entry& b) {
                       return _wcsicmp(a.title.c_str(), b.title.c_str()) < 0;
                   });
+        if (buildTrigram) BuildTrigram();
     }
 
     bool Initialize() override { return true; }
@@ -70,8 +73,38 @@ public:
     iris::ItemType GetType(size_t i) const override { return entries_[i].type; }
     uint8_t GetPathDepth(size_t i) const override { return entries_[i].depth; }
     std::wstring GetPath(size_t i) const override { return entries_[i].path; }
+    const iris::TrigramIndex* GetTrigramIndex() const override {
+        return withTrigram_ ? &trigram_ : nullptr;
+    }
 
 private:
+    // 经真 IndexStore 构建 trigram（与生产同路径）：name=title，dir=subtitle
+    void BuildTrigram() {
+        iris::IndexStore store;
+        auto& names = store.NamePool();
+        auto& dirs  = store.DirPool();
+        for (const auto& e : entries_) {
+            const uint16_t dirId = store.AddDir(
+                {dirs.Insert(e.subtitle),
+                 static_cast<uint16_t>(e.subtitle.size()), UINT32_MAX});
+            iris::CompactFileEntry ce{};
+            ce.nameOffset = names.Insert(e.title);
+            ce.nameLength = static_cast<uint16_t>(e.title.size());
+            ce.type       = static_cast<uint32_t>(e.type);
+            ce.dirId      = dirId;
+            ce.pathDepth  = e.depth;
+            ce.flags      = 0;
+            ce.usnLow     = 0;
+            store.Insert(ce);
+        }
+        store.Sort();
+        store.BuildTrigramIndex();
+        trigram_ = store.GetTrigramIndex();  // 拷贝倒排结构（测试数据小）
+        withTrigram_ = true;
+    }
+
     std::vector<Entry> entries_;
     bool ready_;
+    iris::TrigramIndex trigram_;
+    bool withTrigram_ = false;
 };

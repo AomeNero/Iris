@@ -1,6 +1,7 @@
 // Iris UI —— ResultList 实现
 #include "ui/ResultList.h"
 #include "ui/Theme.h"
+#include "ui/IconCache.h"
 #include "core/WinUtil.h"
 
 #include <QPainter>
@@ -10,7 +11,6 @@
 #include <QString>
 
 #include <string>
-#include <unordered_map>
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -27,56 +27,67 @@ namespace {
 
 // ── 文件局部图标加载器 ──
 // 用 SHGetFileInfoW 取系统图标索引，再经 SHGetImageList 取高清位图（JUMBO 256 →
-// EXTRALARGE 48 → LARGE 32），QtWin::fromHICON 转 QPixmap，按路径缓存。
+// EXTRALARGE 48 → LARGE 32），QtWin::fromHICON 转 QPixmap。
+// 两种模式：realFile=true 访问真实文件提取内嵌图标（exe/lnk 等，Shell 自带
+// per-file 缓存兜底）；false 按扩展名/属性给通用图标（不访问文件）。
+// 缓存经 IconCache 混合 key（图标类按路径、其余按扩展名）+ LRU 上限 512 条，
+// 存缩放后尺寸（~14KB/条，不驻留 JUMBO 256px 原图）。
 // 仅处理 APP/FILE；BOOKMARK 无 OS 图标，由 DrawGlobe 画矢量地球仪。
-class IconLoader {
-public:
-    QPixmap Get(const std::wstring& path) {
-        if (path.empty()) return {};
-        auto it = cache_.find(path);
-        if (it != cache_.end()) return it->second;
-        QPixmap pm = LoadFromSystem(path);
-        cache_.emplace(path, pm);
-        return pm;
-    }
-private:
-    static QPixmap LoadFromSystem(const std::wstring& path) {
-        SHFILEINFOW fi{};
-        if (!SHGetFileInfoW(path.c_str(), FILE_ATTRIBUTE_NORMAL, &fi, sizeof(fi),
-                            SHGFI_SYSICONINDEX | SHGFI_USEFILEATTRIBUTES)) {
-            // 兜底：直接取 LARGEICON（32px）
-            return LoadPlain(path);
-        }
-        const int idx = fi.iIcon;
-        for (int shil : {SHIL_JUMBO, SHIL_EXTRALARGE, SHIL_LARGE}) {
-            IImageList* pImg = nullptr;
-            if (SUCCEEDED(SHGetImageList(shil, IID_PPV_ARGS(&pImg))) && pImg) {
-                HICON hIcon = nullptr;
-                const HRESULT hr = pImg->GetIcon(idx, ILD_TRANSPARENT, &hIcon);
-                pImg->Release();
-                if (SUCCEEDED(hr) && hIcon) {
-                    QPixmap pm = QtWin::fromHICON(hIcon);
-                    DestroyIcon(hIcon);
-                    if (!pm.isNull()) return pm;
-                }
-            }
-        }
+QPixmap LoadPlain(const std::wstring& path);
+
+QPixmap LoadFromSystem(const std::wstring& path, bool realFile) {
+    SHFILEINFOW fi{};
+    const DWORD flags = SHGFI_SYSICONINDEX | (realFile ? 0 : SHGFI_USEFILEATTRIBUTES);
+    if (!SHGetFileInfoW(path.c_str(), realFile ? 0 : FILE_ATTRIBUTE_NORMAL,
+                        &fi, sizeof(fi), flags)) {
+        // 兜底：直接取 LARGEICON（32px）
         return LoadPlain(path);
     }
-    static QPixmap LoadPlain(const std::wstring& path) {
-        SHFILEINFOW fi{};
-        if (SHGetFileInfoW(path.c_str(), FILE_ATTRIBUTE_NORMAL, &fi, sizeof(fi),
-                           SHGFI_ICON | SHGFI_LARGEICON | SHGFI_USEFILEATTRIBUTES) && fi.hIcon) {
-            QPixmap pm = QtWin::fromHICON(fi.hIcon);
-            DestroyIcon(fi.hIcon);
-            return pm;
+    const int idx = fi.iIcon;
+    for (int shil : {SHIL_JUMBO, SHIL_EXTRALARGE, SHIL_LARGE}) {
+        IImageList* pImg = nullptr;
+        if (SUCCEEDED(SHGetImageList(shil, IID_PPV_ARGS(&pImg))) && pImg) {
+            HICON hIcon = nullptr;
+            const HRESULT hr = pImg->GetIcon(idx, ILD_TRANSPARENT, &hIcon);
+            pImg->Release();
+            if (SUCCEEDED(hr) && hIcon) {
+                QPixmap pm = QtWin::fromHICON(hIcon);
+                DestroyIcon(hIcon);
+                if (!pm.isNull()) return pm;
+            }
         }
-        return {};
     }
-    std::unordered_map<std::wstring, QPixmap> cache_;
-};
+    return LoadPlain(path);
+}
 
-IconLoader& Icons() { static IconLoader inst; return inst; }
+QPixmap LoadPlain(const std::wstring& path) {
+    SHFILEINFOW fi{};
+    if (SHGetFileInfoW(path.c_str(), FILE_ATTRIBUTE_NORMAL, &fi, sizeof(fi),
+                       SHGFI_ICON | SHGFI_LARGEICON | SHGFI_USEFILEATTRIBUTES) && fi.hIcon) {
+        QPixmap pm = QtWin::fromHICON(fi.hIcon);
+        DestroyIcon(fi.hIcon);
+        return pm;
+    }
+    return {};
+}
+
+IconCache& Icons() {
+    static IconCache inst([](const std::wstring& path) {
+        QPixmap pm;
+        if (HasIconBearingExtension(path)) {
+            pm = LoadFromSystem(path, /*realFile=*/true);   // Shell 提取内嵌真实图标
+            if (pm.isNull())
+                pm = LoadFromSystem(path, /*realFile=*/false);  // 回退属性模式通用图标
+        } else {
+            pm = LoadFromSystem(path, /*realFile=*/false);
+        }
+        if (pm.isNull()) return pm;
+        // 存绘制尺寸（DPI 缩放后的 60 逻辑 px）：PaintRow 免每帧重采样，内存 ~14KB/条
+        const int s = DpiHelper::Scale(60);
+        return pm.scaled(s, s, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+    }, 512);
+    return inst;
+}
 
 const QPixmap& EnterPixWhite() {
     // enter.png 染纯白（选中行紫底需白色图标）：用 alpha 通道 + 白色填充
@@ -329,8 +340,12 @@ void ResultListView::PaintRow(QPainter& p, int rowIdx, const QRect& r) {
     } else {
         const QPixmap ico = Icons().Get(item.path);
         if (!ico.isNull()) {
-            p.drawPixmap(iconRect, ico.scaled(iconSize, iconSize,
-                                              Qt::KeepAspectRatio, Qt::SmoothTransformation));
+            if (ico.width() == iconSize) {  // 缓存已存显示尺寸 → 免每帧重采样
+                p.drawPixmap(iconRect, ico);
+            } else {
+                p.drawPixmap(iconRect, ico.scaled(iconSize, iconSize,
+                                                  Qt::KeepAspectRatio, Qt::SmoothTransformation));
+            }
         } else {
             p.setPen(Qt::NoPen);
             p.setBrush(selected ? pal.iconFallbackSel : pal.iconFallback);
