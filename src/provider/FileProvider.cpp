@@ -5,11 +5,14 @@
 #include "core/Logger.h"
 #include "core/StringUtil.h"
 #include "core/WinUtil.h"
+#include "provider/IndexSnapshot.h"
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstring>
 #include <filesystem>
+#include <cwctype>
 #include <utility>
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -117,19 +120,67 @@ void FileProvider::CancelInitialize() {
 }
 
 bool FileProvider::Initialize() {
+    const auto initStart = std::chrono::steady_clock::now();
     IRIS_LOG_INFO(L"FileProvider 初始化开始");
 
+    {
+        std::lock_guard lock(deltaMutex_);
+        if (!delta_) delta_ = std::make_unique<UsnDelta>();
+    }
+
+    // ── 快速路径：既有快照 → 加载映射视图（秒级可搜、专用内存近零增量）。
+    //    数据新鲜度由随后的全量重建校准（重建后重写快照并切换视图）。──
+    if (!snapshotPath_.empty()) {
+        if (auto mapped = IndexSnapshot::LoadMapped(snapshotPath_)) {
+            const size_t n = mapped->size();
+            ReplaceIndex(std::move(mapped));
+            totalFiles_.store(n, std::memory_order_relaxed);
+            ready_.store(true, std::memory_order_release);
+            IRIS_LOG_INFO(L"FileProvider 快照加载就绪: 文件数=" + std::to_wstring(n) +
+                          L"（后台重建校准中）");
+            emit dataChanged();
+        } else {
+            IRIS_LOG_INFO(L"FileProvider 无有效快照，走全量重建");
+        }
+    }
+
+    auto store = BuildFullIndex();
+    if (!store) {
+        IRIS_LOG_INFO(L"FileProvider 初始化已取消");
+        return false;
+    }
+    FinalizeAndSwap(std::move(store));
+
+    // ── 启动 USN 监听（轮询增量 → delta → 秒级可见；阈值触发 compact）──
+    if (!watchThread_.joinable())
+        watchThread_ = std::thread([this]() { UsnWatchLoop(); });
+
+    IRIS_LOG_INFO(L"FileProvider 初始化总耗时=" +
+                  std::to_wstring(std::chrono::duration_cast<std::chrono::milliseconds>(
+                                      std::chrono::steady_clock::now() - initStart)
+                                      .count()) + L"ms");
+    return true;
+}
+
+std::shared_ptr<IndexStore> FileProvider::BuildFullIndex() {
+    // compact 重建会再次进入：先关旧卷句柄、清卷表（避免句柄泄漏与重复轮询）
+    {
+        std::lock_guard lock(volumesMutex_);
+        for (auto& v : volumes_) {
+            if (v.hVolume != INVALID_HANDLE_VALUE) {
+                CloseHandle(v.hVolume);
+                v.hVolume = INVALID_HANDLE_VALUE;
+            }
+        }
+        volumes_.clear();
+    }
+
     std::vector<std::wstring> drives = WinUtil::GetLocalDrives();
-    std::shared_ptr<IndexStore> store = std::make_shared<IndexStore>();
+    auto store = std::make_shared<IndexStore>();
     std::unordered_map<uint64_t, uint16_t> dirIdByFrn;
 
-    uint64_t files = 0, dirs = 0;
-
     for (const auto& root : drives) {
-        if (cancelInitialize_.load(std::memory_order_acquire)) {
-            IRIS_LOG_INFO(L"FileProvider 初始化已取消");
-            return false;  // 不 ReplaceIndex / 不置 ready_，直接退出
-        }
+        if (cancelInitialize_.load(std::memory_order_acquire)) return nullptr;
         VolumeInfo vol;
         vol.rootPath = root;
         vol.driveLetter = root.empty() ? 0 : root[0];
@@ -144,44 +195,74 @@ bool FileProvider::Initialize() {
             IRIS_LOG_INFO(L"非 NTFS 卷，降级遍历: " + root);
             FallbackScan(vol, *store, dirIdByFrn);
         }
-        // 保存卷信息用于增量（含已建好的句柄）
-        // 注：BuildVolumeIndex 内打开的句柄存入 vol
+        // 保存卷信息用于增量（BuildVolumeIndex 已写回句柄与 USN 游标）
+        std::lock_guard lock(volumesMutex_);
         volumes_.push_back(std::move(vol));
     }
 
-    if (cancelInitialize_.load(std::memory_order_acquire)) {
-        IRIS_LOG_INFO(L"FileProvider 初始化已取消");
-        return false;  // 扫描中途被取消，不发布半成品索引
-    }
+    if (cancelInitialize_.load(std::memory_order_acquire)) return nullptr;
     store->Sort();
     store->BuildTrigramIndex();  // 构建 trigram 倒排索引（子串搜索用）
-    files = store->size();
+    return store;
+}
 
-    ReplaceIndex(std::const_pointer_cast<const IndexStore>(store));
+void FileProvider::FinalizeAndSwap(std::shared_ptr<IndexStore> store) {
+    const size_t files = store->size();
+
+    bool swappedMapped = false;
+    if (!snapshotPath_.empty()) {
+        // 先切堆 store 顶住搜索（无缝），同时解除旧快照的映射锁——
+        // 被本进程映射中的文件不可被 rename 替换，否则落盘的原子替换必失败。
+        ReplaceIndex(std::const_pointer_cast<const IndexStore>(store));
+        if (IndexSnapshot::Save(*store, snapshotPath_)) {
+            if (auto mapped = IndexSnapshot::LoadMapped(snapshotPath_)) {
+                ReplaceIndex(std::move(mapped));
+                swappedMapped = true;  // 堆 store 随 shared_ptr 出栈释放
+            } else {
+                IRIS_LOG_WARN(L"快照重映射失败，保持堆后端");
+            }
+        } else {
+            IRIS_LOG_WARN(L"快照落盘失败，保持堆后端");
+        }
+    } else {
+        ReplaceIndex(std::const_pointer_cast<const IndexStore>(store));
+    }
     totalFiles_.store(files, std::memory_order_relaxed);
-    totalDirs_.store(dirs, std::memory_order_relaxed);
     ready_.store(true, std::memory_order_release);
 
-    IRIS_LOG_INFO(L"FileProvider 就绪: 文件数=" + std::to_wstring(files));
+    {   // compact 重建后 delta 清零（其变更已并入新索引）
+        std::lock_guard lock(deltaMutex_);
+        if (delta_) delta_->Clear();
+    }
+
+    IRIS_LOG_INFO(L"FileProvider 就绪: 文件数=" + std::to_wstring(files) +
+                  L" 后端=" + (swappedMapped ? L"mmap" : L"heap") +
+                  L" 索引内存=" +
+                  std::to_wstring(store->TotalMemoryBytes() / (1024 * 1024)) + L"MB");
     emit dataChanged();
-    return true;
 }
 
 // ============================================================================
 // BuildVolumeIndex：单个 NTFS 卷的全量索引
 // ============================================================================
-bool FileProvider::BuildVolumeIndex(const VolumeInfo& vol, IndexStore& store,
+bool FileProvider::BuildVolumeIndex(VolumeInfo& vol, IndexStore& store,
                                     std::unordered_map<uint64_t, uint16_t>& dirIdByFrn) {
     const std::wstring volHandlePath = L"\\\\.\\" + std::wstring(1, vol.driveLetter) + L":";
     HANDLE h = CreateFileW(volHandlePath.c_str(), GENERIC_READ,
                            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                            nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (h == INVALID_HANDLE_VALUE) return false;
+    if (h == INVALID_HANDLE_VALUE) {
+        IRIS_LOG_WARN(L"打开卷句柄失败 err=" + std::to_wstring(GetLastError()) +
+                      L" : " + volHandlePath);
+        return false;
+    }
 
     // 查询 USN Journal 状态
     USN_JOURNAL_DATA jd{};
     DWORD br = 0;
     if (!DeviceIoControl(h, FSCTL_QUERY_USN_JOURNAL, nullptr, 0, &jd, sizeof(jd), &br, nullptr)) {
+        IRIS_LOG_WARN(L"FSCTL_QUERY_USN_JOURNAL 失败 err=" + std::to_wstring(GetLastError()) +
+                      L" : " + volHandlePath);
         CloseHandle(h);
         return false;
     }
@@ -266,16 +347,10 @@ bool FileProvider::BuildVolumeIndex(const VolumeInfo& vol, IndexStore& store,
         store.Insert(e);
     }
 
-    // 记录卷的增量游标
-    for (auto& v : volumes_) {
-        if (v.driveLetter == vol.driveLetter) {
-            v.hVolume = h;  // 保留句柄供 Refresh（实际为简单实现，可关闭）
-            v.lastUsn = jd.NextUsn;
-            v.journalId = jd.UsnJournalID;
-            return true;
-        }
-    }
-    // volumes_ 中尚无该卷（Initialize 阶段）：由调用方 push_back；这里不关句柄。
+    // 增量游标与监听句柄写回调用方卷对象（h 所有权随 vol 移交 volumes_，Shutdown 统一关闭）
+    vol.hVolume = h;
+    vol.lastUsn = jd.NextUsn;
+    vol.journalId = jd.UsnJournalID;
     return true;
 }
 
@@ -379,6 +454,135 @@ std::shared_ptr<const IndexStore> FileProvider::Snapshot() const {
 void FileProvider::ReplaceIndex(std::shared_ptr<const IndexStore> next) {
     std::lock_guard lock(indexSwapMutex_);
     index_ = std::move(next);
+    // 随 index_ CoW 重建组合视图（base 代际与 delta 快照绑定，搜索读侧一致）
+    std::shared_ptr<UsnDelta> deltaSnap;
+    {
+        std::lock_guard d(deltaMutex_);
+        if (delta_) deltaSnap = std::make_shared<UsnDelta>(*delta_);
+    }
+    overlay_ = deltaSnap
+        ? std::make_shared<const DeltaOverlay>(index_, *deltaSnap)
+        : std::make_shared<const DeltaOverlay>(index_, UsnDelta{});
+}
+
+std::shared_ptr<const DeltaOverlay> FileProvider::Overlay() const {
+    std::lock_guard lock(indexSwapMutex_);
+    return overlay_;
+}
+
+// ============================================================================
+// USN 实时增量（监听线程）
+// ============================================================================
+
+namespace {
+
+uint64_t NowMs() {
+    return static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count());
+}
+
+} // namespace
+
+void FileProvider::UsnWatchLoop() {
+    {
+        std::lock_guard vl(volumesMutex_);
+        IRIS_LOG_INFO(L"USN 监听线程启动（轮询 2s，NTFS 卷数=" +
+                      std::to_wstring(static_cast<unsigned long>(
+                          std::count_if(volumes_.begin(), volumes_.end(),
+                                        [](const VolumeInfo& v) { return v.isNTFS; }))) +
+                      L"，句柄有效=" +
+                      std::to_wstring(static_cast<unsigned long>(
+                          std::count_if(volumes_.begin(), volumes_.end(),
+                                        [](const VolumeInfo& v) {
+                                            return v.hVolume != INVALID_HANDLE_VALUE;
+                                        }))) +
+                      L"）");
+    }
+    while (!stopWatch_.load(std::memory_order_acquire)) {
+        bool journalInvalid = false;
+        {
+            // 锁序恒为 volumesMutex_ → deltaMutex_（与 FinalizeAndSwap 无逆序）
+            std::lock_guard vl(volumesMutex_);
+            std::lock_guard lock(deltaMutex_);
+            for (auto& v : volumes_) {
+                if (!v.isNTFS) continue;
+                if (!ReadVolumeUsnDelta(v)) { journalInvalid = true; break; }
+            }
+        }
+
+        if (journalInvalid) {
+            IRIS_LOG_WARN(L"USN journal 失效，触发全量重建兜底");
+            TriggerRebuild();
+        } else {
+            bool needCompact = false;
+            {
+                std::lock_guard lock(deltaMutex_);
+                needCompact = delta_ && delta_->ShouldCompact(NowMs());
+            }
+            if (needCompact) {
+                IRIS_LOG_INFO(L"UsnDelta 达到阈值，触发 compact 重建");
+                TriggerRebuild();
+            }
+        }
+
+        if (rebuilding_.load(std::memory_order_acquire)) {
+            // 重建期间暂停轮询（卷句柄将重建），1s 间隔探测结束
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+            continue;
+        }
+        std::this_thread::sleep_for(std::chrono::seconds(2));
+    }
+    IRIS_LOG_INFO(L"USN 监听线程退出");
+}
+
+// 调用方须持有 deltaMutex_（delta_->Apply 在锁内执行）
+bool FileProvider::ReadVolumeUsnDelta(VolumeInfo& vol) {
+    READ_USN_JOURNAL_DATA_V0 rud{};
+    rud.StartUsn = vol.lastUsn;
+    rud.ReasonMask = 0xFFFFFFFF;  // 关注全部 reason（delta 内部按位分派）
+    rud.ReturnOnlyOnClose = FALSE;
+    rud.Timeout = 0;
+    rud.BytesToWaitFor = 0;       // 非阻塞：立即返回当前增量
+    rud.UsnJournalID = vol.journalId;
+
+    constexpr DWORD kBufSize = 64 * 1024;
+    std::vector<BYTE> buf(kBufSize);
+    DWORD br = 0;
+    if (!DeviceIoControl(vol.hVolume, FSCTL_READ_USN_JOURNAL, &rud, sizeof(rud),
+                         buf.data(), kBufSize, &br, nullptr)) {
+        const DWORD err = GetLastError();
+        if (err == ERROR_HANDLE_EOF) return true;  // 无增量
+        IRIS_LOG_WARN(L"FSCTL_READ_USN_JOURNAL 失败 err=" + std::to_wstring(err) +
+                      L" 卷=" + vol.rootPath);
+        return false;  // journal id 失配/句柄失效等 → 兜底重建
+    }
+
+    const USN nextUsn = *reinterpret_cast<const USN*>(buf.data());
+    DWORD off = sizeof(USN);
+    UsnEvent ev;
+    while (off + sizeof(USN_RECORD_V2) <= br) {
+        const size_t used = ParseUsnRecord(buf.data() + off, br - off, ev);
+        if (used == 0) break;
+        off += used;
+        if (ev.attributes & FILE_ATTRIBUTE_DIRECTORY) continue;  // 目录事件忽略
+        if (ShouldExclude(ev.attributes, ev.name, excludeHidden_, excludeSystem_)) continue;
+        delta_->Apply(ev, NowMs());
+    }
+    vol.lastUsn = nextUsn;
+    return true;
+}
+
+void FileProvider::TriggerRebuild() {
+    bool expected = false;
+    if (!rebuilding_.compare_exchange_strong(expected, true)) return;  // 重建中
+    // 上一次重建线程已结束（rebuilding_==false 保证）；detach 结束线程避免 join 竞态
+    if (rebuildThread_.joinable()) rebuildThread_.detach();
+    rebuildThread_ = std::thread([this]() {
+        auto store = BuildFullIndex();
+        if (store) FinalizeAndSwap(std::move(store));
+        rebuilding_.store(false, std::memory_order_release);
+    });
 }
 
 // ============================================================================
@@ -390,41 +594,57 @@ size_t FileProvider::FindFirstPrefix(std::wstring_view prefix) const {
 }
 
 ResultItem FileProvider::BuildResultItem(size_t index) const {
-    auto s = Snapshot();
-    if (!s || index >= s->size()) return {};
-    return s->ToResultItem((*s)[index]);
+    auto ov = Overlay();
+    if (!ov) return {};
+    if (ov->IsDelta(index)) {
+        const auto& c = ov->DeltaChange(index - ov->BaseSize());
+        ResultItem item;
+        item.title     = c.name;
+        item.type      = ItemType::FILE;
+        item.pathDepth = 1;
+        // v1：delta 条目无父目录路径映射 → path 空（OpenItem 对空路径安全忽略），
+        // compact 后由基础索引提供完整路径
+        return item;
+    }
+    if (ov->Base() == nullptr || index >= ov->BaseSize()) return {};
+    return ov->Base()->ToResultItem((*ov->Base())[index]);
 }
 
 std::wstring FileProvider::GetSearchText(size_t index) const {
-    auto s = Snapshot();
-    if (!s || index >= s->size()) return {};
-    const auto& e = (*s)[index];
+    auto ov = Overlay();
+    if (!ov) return {};
+    if (ov->IsDelta(index)) return ov->DeltaChange(index - ov->BaseSize()).name;
+    if (ov->Base() == nullptr || index >= ov->BaseSize()) return {};
+    const auto& e = (*ov->Base())[index];
     std::wstring text;
     text.reserve(e.nameLength + 16);
-    text += std::wstring(s->NameAt(e));
+    text += std::wstring(ov->Base()->NameAt(e));
     text += L' ';
-    text += std::wstring(s->DirOf(e));
+    text += std::wstring(ov->Base()->DirOf(e));
     return text;
 }
 
 ItemType FileProvider::GetType(size_t index) const {
-    auto s = Snapshot();
-    if (!s || index >= s->size()) return ItemType::FILE;
-    return static_cast<ItemType>((*s)[index].type);
+    auto ov = Overlay();
+    if (!ov || ov->IsDelta(index)) return ItemType::FILE;
+    if (ov->Base() == nullptr || index >= ov->BaseSize()) return ItemType::FILE;
+    return static_cast<ItemType>((*ov->Base())[index].type);
 }
 
 uint8_t FileProvider::GetPathDepth(size_t index) const {
-    auto s = Snapshot();
-    if (!s || index >= s->size()) return 0;
-    return (*s)[index].pathDepth;
+    auto ov = Overlay();
+    if (!ov || ov->IsDelta(index)) return 1;
+    if (ov->Base() == nullptr || index >= ov->BaseSize()) return 0;
+    return (*ov->Base())[index].pathDepth;
 }
 
 std::wstring FileProvider::GetPath(size_t index) const {
-    auto s = Snapshot();
-    if (!s || index >= s->size()) return {};
-    const auto& e = (*s)[index];
-    auto dir = s->DirOf(e);
-    auto name = s->NameAt(e);
+    auto ov = Overlay();
+    if (!ov || ov->IsDelta(index)) return {};  // delta 条目 v1 无完整路径
+    if (ov->Base() == nullptr || index >= ov->BaseSize()) return {};
+    const auto& e = (*ov->Base())[index];
+    auto dir = ov->Base()->DirOf(e);
+    auto name = ov->Base()->NameAt(e);
     std::wstring path;
     path.reserve(dir.size() + 1 + name.size());
     path.assign(dir);
@@ -432,6 +652,25 @@ std::wstring FileProvider::GetPath(size_t index) const {
         path += L'\\';
     path.append(name);
     return path;
+}
+
+std::vector<uint32_t> FileProvider::SearchTrigram(std::wstring_view pattern) const {
+    auto candidates = ISearchableProvider::SearchTrigram(pattern);  // base 查询
+    auto ov = Overlay();
+    if (!ov) return candidates;
+    std::wstring lower;
+    lower.reserve(pattern.size());
+    for (wchar_t c : pattern)
+        lower.push_back(static_cast<wchar_t>(towlower(static_cast<wint_t>(c))));
+
+    // base 候选过滤已删除；追加 delta 新增/改名候选（delta 空间 index）
+    std::vector<uint32_t> out;
+    out.reserve(candidates.size() + 8);
+    for (uint32_t idx : candidates)
+        if (!ov->IsRemoved(idx)) out.push_back(idx);
+    for (uint32_t rel : ov->DeltaSubstringCandidates(lower))
+        out.push_back(static_cast<uint32_t>(ov->BaseSize() + rel));
+    return out;
 }
 
 const TrigramIndex* FileProvider::GetTrigramIndex() const {
@@ -458,6 +697,10 @@ std::vector<ResultItem> FileProvider::GetAll() const {
 }
 
 void FileProvider::Shutdown() {
+    CancelInitialize();  // 令重建线程（若在跑）快速退出
+    stopWatch_.store(true, std::memory_order_release);
+    if (watchThread_.joinable()) watchThread_.join();
+    if (rebuildThread_.joinable()) rebuildThread_.join();
     for (auto& v : volumes_) {
         if (v.hVolume != INVALID_HANDLE_VALUE) {
             CloseHandle(v.hVolume);

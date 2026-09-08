@@ -118,7 +118,10 @@ int main(int argc, char* argv[]) {
     auto file     = cfg.providers.file.enabled     ? std::make_shared<FileProvider>()     : nullptr;
     auto bookmark = cfg.providers.bookmark.enabled ? std::make_shared<BookmarkProvider>() : nullptr;
     auto apps     = cfg.providers.app.enabled      ? std::make_shared<AppProvider>()      : nullptr;
-    if (file) file->SetExcludeFlags(cfg.excludeHidden, cfg.excludeSystem);
+    if (file) {
+        file->SetExcludeFlags(cfg.excludeHidden, cfg.excludeSystem);
+        file->SetSnapshotPath(exeDir / L"Iris.idx");  // 快照：启动秒级可搜 + mmap 低内存
+    }
 
     // ── 搜索引擎：注入 Provider + 历史（在后台 Initialize 启动前完成，
     //    happens-before：DoSearch 读取这些 shared_ptr 无数据竞争）──

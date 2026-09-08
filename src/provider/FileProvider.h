@@ -8,9 +8,11 @@
 
 #include <atomic>
 #include <cstdint>
+#include <filesystem>
 #include <memory>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -19,8 +21,10 @@
 #endif
 #include <windows.h>   // DWORD / HANDLE（本头文件接口与内部类型使用）
 
+#include "provider/DeltaOverlay.h"
 #include "provider/ISearchableProvider.h"
 #include "provider/IndexStore.h"
+#include "provider/UsnDelta.h"
 
 namespace iris {
 
@@ -48,6 +52,9 @@ public:
     uint8_t     GetPathDepth(size_t index) const override;
     std::wstring GetPath(size_t index) const override;
     const TrigramIndex* GetTrigramIndex() const override;
+    /// 子串搜索：base 候选（过滤已删除）+ delta 新增/改名候选（合并到
+    /// index >= baseSize 的 delta 空间）。前缀扫描路径（<3 字符查询）不含 delta。
+    std::vector<uint32_t> SearchTrigram(std::wstring_view pattern) const override;
 
     // ---- 排除规则（纯函数，供测试）----
     // fileAttributes: USN_RECORD 的 FileAttributes；不调 GetFileAttributesW。
@@ -57,6 +64,10 @@ public:
 
     /// 按配置设置排除标志（须在 Initialize 前调用）。
     void SetExcludeFlags(bool excludeHidden, bool excludeSystem);
+
+    /// 设置快照文件路径（须在 Initialize 前调用；空 = 不使用快照）。
+    /// 有快照：启动加载映射视图秒级可搜，随后后台全量重建校准并重写快照。
+    void SetSnapshotPath(std::filesystem::path p) { snapshotPath_ = std::move(p); }
 
 private:
     struct VolumeInfo {
@@ -69,7 +80,8 @@ private:
     };
 
     // 构建一个卷的索引（全量），填充 store。返回 true 成功。
-    bool BuildVolumeIndex(const VolumeInfo& vol, IndexStore& store,
+    // 成功时把打开的卷句柄与 USN 游标写回 vol（所有权随 vol 移交 volumes_）。
+    bool BuildVolumeIndex(VolumeInfo& vol, IndexStore& store,
                           std::unordered_map<uint64_t, uint16_t>& dirIdByFrn);
 
     // 非 NTFS 降级扫描
@@ -86,16 +98,39 @@ private:
     // CoW：取当前索引（无锁拷贝 shared_ptr）
     std::shared_ptr<const IndexStore> Snapshot() const;
     void ReplaceIndex(std::shared_ptr<const IndexStore> next);
+    // 取当前组合视图（base + delta 快照；与 index_ 同锁 CoW）
+    std::shared_ptr<const DeltaOverlay> Overlay() const;
+
+    // —— 全量构建 / 定格切换（Initialize 与 compact 重建共用）——
+    std::shared_ptr<IndexStore> BuildFullIndex();          // 取消时返回 nullptr
+    void FinalizeAndSwap(std::shared_ptr<IndexStore> store); // 落盘+切视图+清 delta
+
+    // —— USN 实时增量（监听线程；轮询各 NTFS 卷的增量并应用 delta）——
+    void UsnWatchLoop();
+    // 调用方须持有 deltaMutex_。返回 false = journal 失效（需全量重建兜底）
+    bool ReadVolumeUsnDelta(VolumeInfo& vol);
+    void TriggerRebuild();   // 幂等：重建中则忽略
 
     std::shared_ptr<const IndexStore> index_;
     mutable std::mutex                indexSwapMutex_;
-    std::vector<VolumeInfo>           volumes_;
+    std::vector<VolumeInfo>           volumes_;     // guard: volumesMutex_（watch 遍历 vs rebuild 重建）
+    mutable std::mutex                volumesMutex_;
+    std::filesystem::path             snapshotPath_;
     std::atomic<bool>                 ready_{false};
     std::atomic<uint64_t>             totalFiles_{0};
     std::atomic<uint64_t>             totalDirs_{0};
     bool                              excludeHidden_ = true;
     bool                              excludeSystem_ = true;
     std::atomic<bool>                 cancelInitialize_{false};  // 退出时 set，使 Initialize 快速结束
+
+    // —— USN 实时增量（7b）——
+    std::unique_ptr<UsnDelta>           delta_;       // guard: deltaMutex_
+    mutable std::mutex                  deltaMutex_;
+    std::shared_ptr<const DeltaOverlay> overlay_;     // guard: indexSwapMutex_（随 index_ CoW）
+    std::thread                         watchThread_;
+    std::thread                         rebuildThread_;
+    std::atomic<bool>                   stopWatch_{false};
+    std::atomic<bool>                   rebuilding_{false};
 };
 
 } // namespace iris

@@ -43,6 +43,39 @@ set(SRC ${CMAKE_SOURCE_DIR}/src)
 # ---- 模块 2：data-model（纯头文件）----
 add_iris_test(test_data_model test_data_model.cpp)
 
+# ---- TrigramIndex（候选集语义：必要条件交集，验证下沉 Matcher）----
+add_iris_test(test_trigram
+    test_trigram.cpp
+    ${SRC}/provider/TrigramIndex.cpp)
+
+# ---- LruCache + IconCache（扩展名归一化 + LRU；QPixmap 需 QGuiApplication）----
+add_iris_test(test_icon_cache NOMAIN
+    test_icon_cache.cpp
+    ${SRC}/core/LruCache.h
+    ${SRC}/ui/IconCache.h
+    ${SRC}/ui/IconCache.cpp
+    LINK Qt5::Gui)
+# 静态 Qt5：链 Gui 的 target 同样须排除 QTiffPlugin（其依赖的 Qt5::Zlib 在本安装中缺失）
+qt5_import_plugins(test_icon_cache EXCLUDE Qt5::QTiffPlugin)
+
+# ---- IndexSnapshot（快照序列化 round-trip）----
+add_iris_test(test_snapshot
+    test_snapshot.cpp
+    ${SRC}/provider/IndexSnapshot.cpp
+    ${SRC}/provider/TrigramIndex.cpp
+    ${SRC}/core/Logger.cpp
+    ${SRC}/core/StringUtil.cpp)
+
+# ---- UsnRecordParser + UsnDelta（纯字节流/纯逻辑，不碰真卷）----
+add_iris_test(test_usn_delta
+    test_usn_delta.cpp
+    ${SRC}/provider/UsnRecordParser.cpp)
+
+# ---- DeltaOverlay（基础索引 + delta 组合视图；IndexStore 纯头 + Trigram 实现）----
+add_iris_test(test_delta_overlay
+    test_delta_overlay.cpp
+    ${SRC}/provider/TrigramIndex.cpp)
+
 # ---- 模块 3：Config ----
 add_iris_test(test_config
     test_config.cpp ${SRC}/core/Config.cpp ${SRC}/core/WinUtil.cpp
@@ -55,7 +88,9 @@ add_iris_test(test_file_provider
     ${SRC}/provider/ISearchableProvider.h
     ${SRC}/provider/FileProvider.h
     ${SRC}/provider/FileProvider.cpp
+    ${SRC}/provider/IndexSnapshot.cpp
     ${SRC}/provider/TrigramIndex.cpp
+    ${SRC}/provider/UsnRecordParser.cpp
     ${SRC}/core/StringUtil.cpp
     ${SRC}/core/Logger.cpp
     ${SRC}/core/WinUtil.cpp
@@ -112,6 +147,7 @@ add_iris_test(test_bookmark_provider
     ${SRC}/provider/BookmarkProvider.cpp
     ${SRC}/provider/IProvider.h
     ${SRC}/provider/ISearchableProvider.h
+    ${SRC}/provider/TrigramIndex.cpp
     ${SRC}/core/PinyinUtil.cpp
     ${SRC}/core/StringUtil.cpp
     ${SRC}/core/Logger.cpp
@@ -125,6 +161,7 @@ add_iris_test(test_app_provider
     ${SRC}/provider/AppProvider.cpp
     ${SRC}/provider/IProvider.h
     ${SRC}/provider/ISearchableProvider.h
+    ${SRC}/provider/TrigramIndex.cpp
     ${SRC}/core/PinyinUtil.cpp
     ${SRC}/core/StringUtil.cpp
     ${SRC}/core/Logger.cpp

@@ -3,6 +3,8 @@
 
 #include "core/Logger.h"
 
+#include <chrono>
+
 namespace iris {
 
 SearchEngine::SearchEngine(QObject* parent) : QObject(parent) {
@@ -60,6 +62,8 @@ int SearchEngine::SearchAsync(const std::wstring& rawText) {
 void SearchEngine::DoSearch(std::shared_ptr<SearchContext> ctx) {
     if (ctx->cancelled->load(std::memory_order_acquire)) return;
 
+    const auto searchStart = std::chrono::steady_clock::now();
+
     const ParsedQuery query = parser_.Parse(ctx->rawText);
 
     // 空输入 → 空结果 [已确认 E1]
@@ -102,6 +106,12 @@ void SearchEngine::DoSearch(std::shared_ptr<SearchContext> ctx) {
     for (auto& r : results)
         qresults.append(std::move(r));
 
+    IRIS_LOG_INFO(L"Search 耗时=" +
+                  std::to_wstring(std::chrono::duration_cast<std::chrono::microseconds>(
+                                      std::chrono::steady_clock::now() - searchStart)
+                                      .count()) +
+                  L"us 关键词=" + ctx->rawText + L" 匹配=" +
+                  std::to_wstring(matches.size()));
     emit searchFinished(qresults);
 }
 
