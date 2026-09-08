@@ -1,8 +1,8 @@
-<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+﻿<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
-  <assemblyIdentity type="win32" name="Iris.IrisSearch" version="1.3.0.0"/>
+  <assemblyIdentity type="win32" name="Iris.IrisSearch" version="1.4.0.0"/>
 
-  <!-- 不请求提权 -->
+  <!-- 涓嶈姹傛彁鏉?-->
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
     <security>
       <requestedPrivileges>
@@ -11,7 +11,7 @@
     </security>
   </trustInfo>
 
-  <!-- Per-Monitor V2 DPI 感知 -->
+  <!-- Per-Monitor V2 DPI 鎰熺煡 -->
   <application xmlns="urn:schemas-microsoft-com:asm.v3">
     <windowsSettings>
       <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware>
@@ -19,7 +19,7 @@
     </windowsSettings>
   </application>
 
-  <!-- 兼容性：声明支持 Windows 10 -->
+  <!-- 鍏煎鎬э細澹版槑鏀寔 Windows 10 -->
   <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
     <application>
       <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}"/>
