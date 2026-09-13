@@ -69,17 +69,34 @@ int main(int argc, char* argv[]) {
             if (std::string_view(argv[i]) == "--minimized") return true;
         return false;
     }();
+    // ── 解析 --replace：配合托盘"以管理员重启"——等旧实例退出后接管单实例身份 ──
+    const bool replace = [&] {
+        for (int i = 1; i < argc; ++i)
+            if (std::string_view(argv[i]) == "--replace") return true;
+        return false;
+    }();
 
     // ── 单实例：已有实例运行时，通知其显示窗口后立即退出，不另起进程 ──
     static constexpr const wchar_t* kMutexName = L"Local\\IrisSingleInstance";
     static constexpr const wchar_t* kShowEvent = L"Local\\IrisShowWindow";
-    CreateMutexW(nullptr, TRUE, kMutexName);
+    HANDLE hInstanceMutex = CreateMutexW(nullptr, TRUE, kMutexName);
     if (GetLastError() == ERROR_ALREADY_EXISTS) {
-        if (HANDLE h = OpenEventW(EVENT_MODIFY_STATE, FALSE, kShowEvent)) {
-            SetEvent(h);
-            CloseHandle(h);
+        if (!replace) {
+            if (HANDLE h = OpenEventW(EVENT_MODIFY_STATE, FALSE, kShowEvent)) {
+                SetEvent(h);
+                CloseHandle(h);
+            }
+            return 0;
         }
-        return 0;
+        // --replace：轮询等旧实例退出（≤10s）后接管；超时放弃，避免双实例
+        bool acquired = false;
+        for (int i = 0; i < 50; ++i) {
+            Sleep(200);
+            if (hInstanceMutex) CloseHandle(hInstanceMutex);
+            hInstanceMutex = CreateMutexW(nullptr, TRUE, kMutexName);
+            if (GetLastError() != ERROR_ALREADY_EXISTS) { acquired = true; break; }
+        }
+        if (!acquired) return 0;
     }
 
     QApplication app(argc, argv);
@@ -212,6 +229,28 @@ int main(int argc, char* argv[]) {
         Config::Instance().Set(cur);
         Config::Instance().Save();
         iris::WinUtil::SetAutoStart(on);
+    });
+
+    // USN 监听整体不可用（非提权）→ 托盘 tooltip 提示索引为静态快照
+    if (file) {
+        QObject::connect(file.get(), &FileProvider::usnWatchUnavailable, &tray,
+                         [&tray]() { tray.SetUsnUnavailable(true); });
+        // journal 失效重建被熔断 → 警告气泡（每进程一次，由 Provider 去重）
+        QObject::connect(file.get(), &FileProvider::rebuildSuspended, &tray,
+                         [&tray]() {
+                             tray.ShowWarningNotification(
+                                 QString::fromUtf8("Iris"),
+                                 QString::fromUtf8("文件索引自动更新已暂停（重建触发过频）。\n"
+                                                   "建议托盘右键 → 以管理员重启。"));
+                         });
+    }
+    // 以管理员重启：UAC 同意 → 新实例 --replace 等本实例退出后接管；取消 → 保持现状
+    QObject::connect(&tray, &TrayIcon::restartAsAdminRequested, &app, [&app]() {
+        const std::wstring exe = reinterpret_cast<const wchar_t*>(
+            QCoreApplication::applicationFilePath().utf16());
+        const HINSTANCE h = ShellExecuteW(nullptr, L"runas", exe.c_str(),
+                                          L"--replace", nullptr, SW_SHOWNORMAL);
+        if (reinterpret_cast<INT_PTR>(h) > 32) app.quit();
     });
 
     if (!minimized) {

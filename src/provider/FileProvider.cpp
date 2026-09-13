@@ -190,6 +190,10 @@ std::shared_ptr<IndexStore> FileProvider::BuildFullIndex() {
             if (!BuildVolumeIndex(vol, *store, dirIdByFrn)) {
                 IRIS_LOG_WARN(L"NTFS 索引失败，降级遍历: " + root);
                 FallbackScan(vol, *store, dirIdByFrn);
+                // USN 不可用（典型：非提权开卷 err=5）→ 禁用该卷监听，索引保持
+                // 静态快照；绝不以此为由全量重建（v1.4.0 重建风暴根因）。
+                vol.usnDisabled = true;
+                IRIS_LOG_WARN(L"USN 监听已禁用: " + root + L"（无法获得卷句柄）");
             }
         } else {
             IRIS_LOG_INFO(L"非 NTFS 卷，降级遍历: " + root);
@@ -485,46 +489,61 @@ uint64_t NowMs() {
 } // namespace
 
 void FileProvider::UsnWatchLoop() {
+    size_t pollable = 0;
     {
         std::lock_guard vl(volumesMutex_);
+        for (const auto& v : volumes_)
+            if (ShouldPollVolume(v.isNTFS, v.usnDisabled)) ++pollable;
         IRIS_LOG_INFO(L"USN 监听线程启动（轮询 2s，NTFS 卷数=" +
                       std::to_wstring(static_cast<unsigned long>(
                           std::count_if(volumes_.begin(), volumes_.end(),
                                         [](const VolumeInfo& v) { return v.isNTFS; }))) +
-                      L"，句柄有效=" +
+                      L"，可轮询=" + std::to_wstring(pollable) +
+                      L"，已禁用=" +
                       std::to_wstring(static_cast<unsigned long>(
                           std::count_if(volumes_.begin(), volumes_.end(),
-                                        [](const VolumeInfo& v) {
-                                            return v.hVolume != INVALID_HANDLE_VALUE;
-                                        }))) +
+                                        [](const VolumeInfo& v) { return v.usnDisabled; }))) +
                       L"）");
     }
+    // 启动即无可轮询卷（典型：非提权）→ 一次性通知 UI
+    if (pollable == 0 && !usnUnavailableEmitted_.exchange(true))
+        emit usnWatchUnavailable();
+
     while (!stopWatch_.load(std::memory_order_acquire)) {
-        bool journalInvalid = false;
+        bool journalRebuild = false;
+        bool needCompact    = false;
+        bool allDisabled    = false;
         {
             // 锁序恒为 volumesMutex_ → deltaMutex_（与 FinalizeAndSwap 无逆序）
             std::lock_guard vl(volumesMutex_);
             std::lock_guard lock(deltaMutex_);
+            const uint64_t now = NowMs();
             for (auto& v : volumes_) {
-                if (!v.isNTFS) continue;
-                if (!ReadVolumeUsnDelta(v)) { journalInvalid = true; break; }
+                if (!ShouldPollVolume(v.isNTFS, v.usnDisabled)) continue;
+                if (v.backoffDelayMs > 0 && now - v.lastPollMs < v.backoffDelayMs) continue;
+                v.lastPollMs = now;
+                const uint32_t err = ReadVolumeUsnDelta(v);
+                if (err == 0) {  // 成功/无增量
+                    v.backoffFails = 0;
+                    v.backoffDelayMs = 0;
+                    continue;
+                }
+                if (HandleUsnReadFailure(v, err)) journalRebuild = true;
             }
+            needCompact = delta_ && delta_->ShouldCompact(now);
+            allDisabled = !volumes_.empty();
+            for (const auto& v : volumes_)
+                if (ShouldPollVolume(v.isNTFS, v.usnDisabled)) { allDisabled = false; break; }
         }
 
-        if (journalInvalid) {
-            IRIS_LOG_WARN(L"USN journal 失效，触发全量重建兜底");
-            TriggerRebuild();
-        } else {
-            bool needCompact = false;
-            {
-                std::lock_guard lock(deltaMutex_);
-                needCompact = delta_ && delta_->ShouldCompact(NowMs());
-            }
-            if (needCompact) {
-                IRIS_LOG_INFO(L"UsnDelta 达到阈值，触发 compact 重建");
-                TriggerRebuild();
-            }
+        if (journalRebuild) {
+            TriggerRebuild(RebuildReason::JournalInvalid);
+        } else if (needCompact) {
+            TriggerRebuild(RebuildReason::Compact);
         }
+        // 全部卷监听不可用 → 一次性通知 UI（重建会重建卷表，逐轮重新评估）
+        if (allDisabled && !usnUnavailableEmitted_.exchange(true))
+            emit usnWatchUnavailable();
 
         if (rebuilding_.load(std::memory_order_acquire)) {
             // 重建期间暂停轮询（卷句柄将重建），1s 间隔探测结束
@@ -536,8 +555,9 @@ void FileProvider::UsnWatchLoop() {
     IRIS_LOG_INFO(L"USN 监听线程退出");
 }
 
-// 调用方须持有 deltaMutex_（delta_->Apply 在锁内执行）
-bool FileProvider::ReadVolumeUsnDelta(VolumeInfo& vol) {
+// 调用方须持有 deltaMutex_（delta_->Apply 在锁内执行）。
+// 返回 0 = 成功（含无增量 EOF），否则 Win32 错误码（分派交由调用方）。
+uint32_t FileProvider::ReadVolumeUsnDelta(VolumeInfo& vol) {
     READ_USN_JOURNAL_DATA_V0 rud{};
     rud.StartUsn = vol.lastUsn;
     rud.ReasonMask = 0xFFFFFFFF;  // 关注全部 reason（delta 内部按位分派）
@@ -551,11 +571,7 @@ bool FileProvider::ReadVolumeUsnDelta(VolumeInfo& vol) {
     DWORD br = 0;
     if (!DeviceIoControl(vol.hVolume, FSCTL_READ_USN_JOURNAL, &rud, sizeof(rud),
                          buf.data(), kBufSize, &br, nullptr)) {
-        const DWORD err = GetLastError();
-        if (err == ERROR_HANDLE_EOF) return true;  // 无增量
-        IRIS_LOG_WARN(L"FSCTL_READ_USN_JOURNAL 失败 err=" + std::to_wstring(err) +
-                      L" 卷=" + vol.rootPath);
-        return false;  // journal id 失配/句柄失效等 → 兜底重建
+        return GetLastError();
     }
 
     const USN nextUsn = *reinterpret_cast<const USN*>(buf.data());
@@ -570,10 +586,97 @@ bool FileProvider::ReadVolumeUsnDelta(VolumeInfo& vol) {
         delta_->Apply(ev, NowMs());
     }
     vol.lastUsn = nextUsn;
-    return true;
+    return 0;
 }
 
-void FileProvider::TriggerRebuild() {
+// 调用方须持有 volumesMutex_ + deltaMutex_。按分派表处理读取失败。
+// 返回 true = journal 确凿失效，需全量重建（经熔断器）。
+bool FileProvider::HandleUsnReadFailure(VolumeInfo& vol, uint32_t err) {
+    const std::wstring volLog = L"卷=" + vol.rootPath +
+                                L" err=" + std::to_wstring(err);
+    switch (ClassifyUsnError(err)) {
+    case UsnErrorAction::Ignore:
+        return false;  // 无增量
+    case UsnErrorAction::ReopenOnce: {
+        const ReopenResult rr = ReopenVolumeHandle(vol);
+        if (rr == ReopenResult::Ok) {  // 同一 journal：游标仍有效，恢复轮询
+            vol.backoffFails = 0;
+            vol.backoffDelayMs = 0;
+            IRIS_LOG_INFO(L"USN 卷句柄已重开 " + volLog);
+            return false;
+        }
+        if (rr == ReopenResult::JournalChanged) return true;  // journal 已更换 → 确凿失效
+        IRIS_LOG_WARN(L"USN 监听已禁用（重开句柄失败） " + volLog + L"，索引保持静态");
+        vol.usnDisabled = true;
+        return false;
+    }
+    case UsnErrorAction::DisableVolume:
+        IRIS_LOG_WARN(L"USN 监听已禁用 " + volLog + L"，索引保持静态");
+        vol.usnDisabled = true;
+        return false;
+    case UsnErrorAction::Rebuild:
+        IRIS_LOG_WARN(L"USN journal 失效 " + volLog + L"，触发全量重建（经熔断器）");
+        return true;
+    case UsnErrorAction::Backoff:
+    default:
+        ++vol.backoffFails;
+        if (vol.backoffFails >= 5) {
+            IRIS_LOG_WARN(L"USN 监听已禁用（未知错误连续失败） " + volLog + L"，索引保持静态");
+            vol.usnDisabled = true;
+            return false;
+        }
+        vol.backoffDelayMs = std::min<uint64_t>(60000, 2000ull << (vol.backoffFails - 1));
+        IRIS_LOG_WARN(L"USN 读取失败，退避重试 " + volLog +
+                      L" 次数=" + std::to_wstring(vol.backoffFails) +
+                      L" 退避ms=" + std::to_wstring(vol.backoffDelayMs));
+        return false;
+    }
+}
+
+// 重开卷句柄并重查 journal 身份。Ok = 同一 journal（lastUsn 仍有效）；
+// JournalChanged = 卷被重挂载/格式化（旧游标无意义）；Failed = 无法获得句柄。
+FileProvider::ReopenResult FileProvider::ReopenVolumeHandle(VolumeInfo& vol) {
+    if (vol.hVolume != INVALID_HANDLE_VALUE) {
+        CloseHandle(vol.hVolume);
+        vol.hVolume = INVALID_HANDLE_VALUE;
+    }
+    const std::wstring volHandlePath =
+        L"\\\\.\\" + std::wstring(1, vol.driveLetter) + L":";
+    HANDLE h = CreateFileW(volHandlePath.c_str(), GENERIC_READ,
+                           FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                           nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h == INVALID_HANDLE_VALUE) return ReopenResult::Failed;
+
+    USN_JOURNAL_DATA jd{};
+    DWORD br = 0;
+    if (!DeviceIoControl(h, FSCTL_QUERY_USN_JOURNAL, nullptr, 0,
+                         &jd, sizeof(jd), &br, nullptr)) {
+        CloseHandle(h);
+        return ReopenResult::Failed;
+    }
+    vol.hVolume = h;
+    if (jd.UsnJournalID != vol.journalId) {
+        vol.journalId = jd.UsnJournalID;
+        vol.lastUsn = jd.NextUsn;
+        return ReopenResult::JournalChanged;
+    }
+    return ReopenResult::Ok;
+}
+
+void FileProvider::TriggerRebuild(RebuildReason reason) {
+    if (reason == RebuildReason::JournalInvalid) {
+        // 熔断：仅统计 journal 失效驱动的重建（compact/启动初始化不计数），
+        // 兜底任何未知原因导致的重建风暴（v1.4.0 曾 60 分钟内重建 ~40 次）。
+        const uint64_t now = NowMs();
+        if (!rebuildBreaker_.ShouldAllow(now)) {
+            if (!rebuildSuspendNotified_.exchange(true)) {
+                IRIS_LOG_ERROR(L"全量重建触发过频（60 分钟窗口超限），已熔断暂停；索引保持当前状态");
+                emit rebuildSuspended();
+            }
+            return;
+        }
+        rebuildBreaker_.RecordRebuild(now);
+    }
     bool expected = false;
     if (!rebuilding_.compare_exchange_strong(expected, true)) return;  // 重建中
     // 上一次重建线程已结束（rebuilding_==false 保证）；detach 结束线程避免 join 竞态

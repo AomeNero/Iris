@@ -47,6 +47,7 @@ void TrayIcon::BuildMenu() {
     aAutoStart_->setCheckable(true);
     QAction* aSettings = contextMenu_->addAction(QString::fromUtf8("设置"));
     QAction* aAbout    = contextMenu_->addAction(QString::fromUtf8("关于"));
+    QAction* aRestartAdmin = contextMenu_->addAction(QString::fromUtf8("以管理员重启"));
     contextMenu_->addSeparator();
     QAction* aQuit     = contextMenu_->addAction(QString::fromUtf8("退出"));
 
@@ -55,6 +56,7 @@ void TrayIcon::BuildMenu() {
     connect(aAutoStart_, &QAction::toggled,   this, [this](bool on) { emit autoStartToggled(on); });
     connect(aSettings,   &QAction::triggered, this, [this] { emit settingsRequested(); });
     connect(aAbout,      &QAction::triggered, this, [this] { emit aboutRequested(); });
+    connect(aRestartAdmin, &QAction::triggered, this, [this] { emit restartAsAdminRequested(); });
     connect(aQuit,       &QAction::triggered, this, [this] { emit quitRequested(); });
 }
 
@@ -68,6 +70,20 @@ void TrayIcon::ShowNotification(const QString& title, const QString& message) {
     if (trayIcon_) {
         trayIcon_->showMessage(title, message, QSystemTrayIcon::Information, 3000);
     }
+}
+
+void TrayIcon::ShowWarningNotification(const QString& title, const QString& message) {
+    if (trayIcon_) {
+        trayIcon_->showMessage(title, message, QSystemTrayIcon::Warning, 5000);
+    }
+}
+
+void TrayIcon::SetUsnUnavailable(bool unavailable) {
+    usnUnavailable_ = unavailable;
+    if (!trayIcon_) return;
+    trayIcon_->setToolTip(usnUnavailable_
+        ? QString::fromUtf8("Iris — 实时更新不可用：索引为启动时快照\n（右键 → 以管理员重启可恢复）")
+        : QString::fromUtf8("Iris"));
 }
 
 } // namespace iris

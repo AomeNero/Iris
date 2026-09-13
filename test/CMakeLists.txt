@@ -71,6 +71,12 @@ add_iris_test(test_usn_delta
     test_usn_delta.cpp
     ${SRC}/provider/UsnRecordParser.cpp)
 
+# ---- USN 监听错误分派 + 重建熔断器（纯逻辑，不碰真卷）----
+add_iris_test(test_usn_watch_policy
+    test_usn_watch_policy.cpp
+    ${SRC}/provider/UsnWatchPolicy.cpp
+    ${SRC}/provider/RebuildBreaker.cpp)
+
 # ---- DeltaOverlay（基础索引 + delta 组合视图；IndexStore 纯头 + Trigram 实现）----
 add_iris_test(test_delta_overlay
     test_delta_overlay.cpp
@@ -88,6 +94,8 @@ add_iris_test(test_file_provider
     ${SRC}/provider/ISearchableProvider.h
     ${SRC}/provider/FileProvider.h
     ${SRC}/provider/FileProvider.cpp
+    ${SRC}/provider/UsnWatchPolicy.cpp
+    ${SRC}/provider/RebuildBreaker.cpp
     ${SRC}/provider/IndexSnapshot.cpp
     ${SRC}/provider/TrigramIndex.cpp
     ${SRC}/provider/UsnRecordParser.cpp

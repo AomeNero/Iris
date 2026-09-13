@@ -24,7 +24,9 @@
 #include "provider/DeltaOverlay.h"
 #include "provider/ISearchableProvider.h"
 #include "provider/IndexStore.h"
+#include "provider/RebuildBreaker.h"
 #include "provider/UsnDelta.h"
+#include "provider/UsnWatchPolicy.h"
 
 namespace iris {
 
@@ -69,6 +71,13 @@ public:
     /// 有快照：启动加载映射视图秒级可搜，随后后台全量重建校准并重写快照。
     void SetSnapshotPath(std::filesystem::path p) { snapshotPath_ = std::move(p); }
 
+signals:
+    /// 所有 NTFS 卷的 USN 监听均不可用（权限不足/句柄不可恢复）→ 索引为静态
+    /// 快照。UI 据此提示（托盘 tooltip 等）。
+    void usnWatchUnavailable();
+    /// journal 失效驱动的全量重建被熔断（窗口内触发过频）。UI 据此气泡告知。
+    void rebuildSuspended();
+
 private:
     struct VolumeInfo {
         std::wstring rootPath;       // 如 "C:\\"
@@ -77,6 +86,11 @@ private:
         uint64_t     lastUsn = 0;     // 上次读取到的 USN 位置
         uint64_t     journalId = 0;
         bool         isNTFS = false;
+        // —— 监听策略状态（guard: volumesMutex_）——
+        bool     usnDisabled    = false;  // 该卷监听已禁用（权限/句柄不可恢复）
+        uint32_t backoffFails   = 0;      // 未知错误连续失败计数
+        uint64_t backoffDelayMs = 0;      // 未知错误退避间隔（0 = 不退避）
+        uint64_t lastPollMs     = 0;      // 上次尝试轮询时刻（退避计时）
     };
 
     // 构建一个卷的索引（全量），填充 store。返回 true 成功。
@@ -106,10 +120,18 @@ private:
     void FinalizeAndSwap(std::shared_ptr<IndexStore> store); // 落盘+切视图+清 delta
 
     // —— USN 实时增量（监听线程；轮询各 NTFS 卷的增量并应用 delta）——
+    enum class RebuildReason { JournalInvalid, Compact };
+    enum class ReopenResult { Ok, Failed, JournalChanged };
     void UsnWatchLoop();
-    // 调用方须持有 deltaMutex_。返回 false = journal 失效（需全量重建兜底）
-    bool ReadVolumeUsnDelta(VolumeInfo& vol);
-    void TriggerRebuild();   // 幂等：重建中则忽略
+    // 调用方须持有 deltaMutex_。返回 0 = 成功（含无增量 EOF），否则 Win32 错误码
+    uint32_t ReadVolumeUsnDelta(VolumeInfo& vol);
+    // 调用方须持有 volumesMutex_ + deltaMutex_。按分派表处理读取失败；
+    // 返回 true = journal 确凿失效（经熔断器全量重建）
+    bool HandleUsnReadFailure(VolumeInfo& vol, uint32_t err);
+    // 重开卷句柄并重查 journal 身份（vol 句柄/游标随之更新）
+    ReopenResult ReopenVolumeHandle(VolumeInfo& vol);
+    // 幂等：重建中则忽略。JournalInvalid 经熔断器（超限拒绝并 emit rebuildSuspended）
+    void TriggerRebuild(RebuildReason reason);
 
     std::shared_ptr<const IndexStore> index_;
     mutable std::mutex                indexSwapMutex_;
@@ -131,6 +153,9 @@ private:
     std::thread                         rebuildThread_;
     std::atomic<bool>                   stopWatch_{false};
     std::atomic<bool>                   rebuilding_{false};
+    RebuildBreaker                      rebuildBreaker_{3, 60 * 60 * 1000};  // 仅 JournalInvalid 计数
+    std::atomic<bool>                   usnUnavailableEmitted_{false};
+    std::atomic<bool>                   rebuildSuspendNotified_{false};
 };
 
 } // namespace iris
