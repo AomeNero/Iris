@@ -1,9 +1,9 @@
-#  ![](resources/iris.png){width=42px}Iris
+#  ![](resources/iris.png)Iris
 
 > Windows 极速桌面启动器——快捷键秒搜文件、应用与书签。
 
 ![CI](https://img.shields.io/github/actions/workflow/status/AomeNero/Iris/ci.yml?branch=main&label=CI&logo=github)
-![Tests](https://img.shields.io/badge/tests-107%20passed-brightgreen?logo=googletest)
+![Tests](https://img.shields.io/badge/tests-133%20passed-brightgreen?logo=googletest)
 ![Coverage](https://img.shields.io/badge/coverage-≥80%25-green)
 ![Version](https://img.shields.io/github/v/release/AomeNero/Iris?label=release&logo=iris)
 ![Platform](https://img.shields.io/badge/platform-Windows%2010%2B-0078D4?logo=windows)
@@ -26,7 +26,7 @@ Windows 自带的搜索慢且入口分散——找文件要去资源管理器、
 
 - **快捷键秒唤**：全局热键（默认 `Alt+Space`）瞬间弹出搜索框，输入即搜、即开。
 - **即时搜索**：Trigram CSR 倒排索引，前缀/子串/拼音搜索毫秒级响应。
-- **极速索引**：直接读取 NTFS USN Journal / MFT，全盘文件毫秒级检索，非 NTFS 自动回退递归扫描；USN 实时监听增量，新建/删除文件秒级可见。
+- **极速索引**：直接读取 NTFS USN Journal / MFT，全盘文件毫秒级检索，非 NTFS 自动回退递归扫描；USN 实时监听增量，新建/删除文件秒级可见。默认以管理员权限运行，USN 全功能开箱即用。
 - **秒启低内存**：索引快照落盘 + 内存映射加载，重启秒级就绪；索引常驻页缓存不计专用内存（284 万文件实测专用内存 ~71MB）。
 - **三源合一**：本地文件、开始菜单应用、Chrome/Edge 浏览器书签统一排序，按使用频次加权。
 - **拼音搜索**：输入拼音直接命中中文（如 `weixin` 找「微信」），全拼 + 首字母，中英混搜无障碍。
@@ -47,14 +47,14 @@ Windows 自带的搜索慢且入口分散——找文件要去资源管理器、
 
 | 角色 | 要求 |
 |------|------|
-| **运行（普通用户）** | Windows 10 (1903+) / Windows 11，**无需任何依赖**——单文件便携 exe |
+| **运行（普通用户）** | Windows 10 (1903+) / Windows 11，**无需任何依赖**——单文件便携 exe；默认请求管理员权限（启动时 UAC 确认一次，用于 USN 全盘实时索引） |
 | **源码构建（开发者）** | CMake ≥ 3.16、MSVC (Visual Studio 2022 / 2026 工具集)、Qt 5.14.2 **静态库** (Core/Gui/Widgets/Svg) |
 
 ### 安装
 
 **方式 A · 下载即用（推荐普通用户）**
 
-前往 [Releases](https://github.com/AomeNero/Iris/releases) 下载 `Iris.exe`，放入任意目录双击运行，托盘出现<img src="resources/iris.png" width="42">图标即就绪。
+前往 [Releases](https://github.com/AomeNero/Iris/releases) 下载 `Iris.exe`，放入任意目录双击运行（UAC 确认），托盘出现<img src="resources/iris.png" width="42">图标即就绪。
 
 **方式 B · 源码构建（开发者）**
 
@@ -85,7 +85,7 @@ scripts\build.cmd                                     # 增量构建 Release
 | `hotkey` | string | `"Alt+Space"` | 全局热键，格式 `Mod[+Mod]+Key`（如 `Ctrl+Alt+P`） |
 | `theme` | string | `"light"` | 主题：`"light"` / `"dark"` |
 | `maxResults` | int | `9` | 结果列表最大显示行数（1–9） |
-| `autoStart` | bool | `true` | 开机自启（注册表 Run 键，托盘可切换） |
+| `autoStart` | bool | `true` | 开机自启（任务计划程序，登录静默启动无 UAC，托盘可切换） |
 | `excludeHidden` | bool | `true` | 索引时排除隐藏文件 |
 | `excludeSystem` | bool | `true` | 索引时排除系统文件 |
 | `providers.file.enabled` | bool | `true` | 启用文件搜索（NTFS USN） |
@@ -103,7 +103,7 @@ scripts\build.cmd                                     # 增量构建 Release
 欢迎 Issue 与 PR！请遵循 [`CONTRIBUTING.md`](CONTRIBUTING.md) 的规范：
 
 - **Issue**：Bug 报告请附复现步骤与 `Iris.exe` 同级 `log/iris_*.log`；功能建议请描述使用场景。
-- **PR**：须通过全部 `ctest`（当前 107 项），提交信息遵循 [约定式提交](https://www.conventionalcommits.org/zh-hans/)（`feat:` / `fix:` / `docs:` …），改动聚焦、不夹带无关重构。
+- **PR**：须通过全部 `ctest`（当前 133 项），提交信息遵循 [约定式提交](https://www.conventionalcommits.org/zh-hans/)（`feat:` / `fix:` / `docs:` …），改动聚焦、不夹带无关重构。
 
 ### 本地开发
 
