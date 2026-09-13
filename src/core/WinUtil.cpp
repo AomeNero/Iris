@@ -74,42 +74,58 @@ ShortcutInfo ResolveShortcut(const std::wstring& lnkPath) {
 }
 
 namespace {
-const std::wstring kRunKey  = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
-const wchar_t*     kRunName = L"Iris";
+const std::wstring kRunKey    = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+const wchar_t*     kRunName   = L"Iris";
+const wchar_t*     kTaskName  = L"Iris";  // 任务计划程序任务名（提权自启用）
+
+// 运行 schtasks 子命令，返回退出码（-1 = 启动失败）。
+// GUI 进程无控制台：CREATE_NO_WINDOW 防止闪窗。
+int RunSchtasks(const std::wstring& args) {
+    std::wstring cmd = L"schtasks.exe " + args;
+    STARTUPINFOW si{};
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESHOWWINDOW;
+    si.wShowWindow = SW_HIDE;
+    PROCESS_INFORMATION pi{};
+    if (!CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, FALSE,
+                        CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi))
+        return -1;
+    CloseHandle(pi.hThread);
+    WaitForSingleObject(pi.hProcess, 8000);
+    DWORD code = 0;
+    GetExitCodeProcess(pi.hProcess, &code);
+    CloseHandle(pi.hProcess);
+    return static_cast<int>(code);
+}
 } // namespace
 
 bool SetAutoStart(bool enable) {
-    HKEY hKey = nullptr;
-    if (RegOpenKeyExW(HKEY_CURRENT_USER, kRunKey.c_str(), 0, KEY_SET_VALUE, &hKey)
-        != ERROR_SUCCESS)
-        return false;
-    bool ok = true;
-    if (enable) {
-        WCHAR exePath[MAX_PATH] = {};
-        GetModuleFileNameW(nullptr, exePath, MAX_PATH);
-        // Run 键 REG_SZ：路径用双引号包裹（便携式部署路径常含空格），
-        // 追加 --minimized，让开机自启时静默启动（仅托盘，不弹搜索窗）
-        std::wstring cmd = std::wstring(L"\"") + exePath + L"\" --minimized";
-        const DWORD bytes = static_cast<DWORD>((cmd.size() + 1) * sizeof(WCHAR));
-        ok = RegSetValueExW(hKey, kRunName, 0, REG_SZ,
-                            reinterpret_cast<BYTE*>(cmd.data()), bytes) == ERROR_SUCCESS;
-    } else {
-        RegDeleteValueW(hKey, kRunName);
+    // requireAdministrator 清单下 HKCU Run 键自启会被 Windows 静默跳过——
+    // 自启走任务计划程序（登录触发 + 最高权限运行；创建一次后开机无 UAC 弹窗）。
+    // 无论开关先清理旧 Run 键值（老版本迁移）；任务不存在时 /Delete 失败被忽略。
+    {
+        HKEY hKey = nullptr;
+        if (RegOpenKeyExW(HKEY_CURRENT_USER, kRunKey.c_str(), 0, KEY_SET_VALUE,
+                          &hKey) == ERROR_SUCCESS) {
+            RegDeleteValueW(hKey, kRunName);
+            RegCloseKey(hKey);
+        }
     }
-    RegCloseKey(hKey);
-    return ok;
+    if (!enable) {
+        RunSchtasks(std::wstring(L"/Delete /TN \"") + kTaskName + L"\" /F");
+        return true;
+    }
+    WCHAR exePath[MAX_PATH] = {};
+    GetModuleFileNameW(nullptr, exePath, MAX_PATH);
+    // /TR 参数内嵌引号转义：任务动作 = "exe路径" --minimized（开机静默仅托盘）
+    const std::wstring args =
+        std::wstring(L"/Create /F /TN \"") + kTaskName +
+        L"\" /SC ONLOGON /RL HIGHEST /TR \"\\\"" + exePath + L"\\\" --minimized\"";
+    return RunSchtasks(args) == 0;
 }
 
 bool IsAutoStartEnabled() {
-    HKEY hKey = nullptr;
-    if (RegOpenKeyExW(HKEY_CURRENT_USER, kRunKey.c_str(), 0, KEY_READ, &hKey)
-        != ERROR_SUCCESS)
-        return false;
-    DWORD type = 0, size = 0;
-    const bool exists =
-        RegQueryValueExW(hKey, kRunName, nullptr, &type, nullptr, &size) == ERROR_SUCCESS;
-    RegCloseKey(hKey);
-    return exists;
+    return RunSchtasks(std::wstring(L"/Query /TN \"") + kTaskName + L"\"") == 0;
 }
 
 std::wstring GetKnownFolderPath(REFKNOWNFOLDERID rfid) {
