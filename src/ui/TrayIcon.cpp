@@ -48,6 +48,7 @@ void TrayIcon::BuildMenu() {
     QAction* aSettings = contextMenu_->addAction(QString::fromUtf8("设置"));
     QAction* aAbout    = contextMenu_->addAction(QString::fromUtf8("关于"));
     QAction* aRestartAdmin = contextMenu_->addAction(QString::fromUtf8("以管理员重启"));
+    QAction* aInstallSvc   = contextMenu_->addAction(QString::fromUtf8("安装实时更新服务"));
     contextMenu_->addSeparator();
     QAction* aQuit     = contextMenu_->addAction(QString::fromUtf8("退出"));
 
@@ -57,6 +58,7 @@ void TrayIcon::BuildMenu() {
     connect(aSettings,   &QAction::triggered, this, [this] { emit settingsRequested(); });
     connect(aAbout,      &QAction::triggered, this, [this] { emit aboutRequested(); });
     connect(aRestartAdmin, &QAction::triggered, this, [this] { emit restartAsAdminRequested(); });
+    connect(aInstallSvc,   &QAction::triggered, this, [this] { emit installServiceRequested(); });
     connect(aQuit,       &QAction::triggered, this, [this] { emit quitRequested(); });
 }
 

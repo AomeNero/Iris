@@ -16,6 +16,7 @@
 #include <QObject>
 #include <QMessageBox>
 #include <QString>
+#include <QTimer>
 #include <QVector>
 #include <QWinEventNotifier>
 
@@ -30,6 +31,7 @@
 #include "core/Logger.h"
 #include "core/PinyinUtil.h"
 #include "core/WinUtil.h"
+#include "service/ServiceProtocol.h"  // kServiceName（安装确认查询）
 #include "ui/SearchWindow.h"
 #include "ui/TrayIcon.h"
 #include "ui/HotkeyManager.h"
@@ -263,6 +265,43 @@ int main(int argc, char* argv[]) {
                                           L"--replace", nullptr, SW_SHOWNORMAL);
         if (reinterpret_cast<INT_PTR>(h) > 32) app.quit();
     });
+
+    // 安装实时更新服务（M1 句柄经纪）：runas 一次 UAC → IrisService --install（幂等）
+    QObject::connect(&tray, &TrayIcon::installServiceRequested, &app,
+        [&tray, &exeDir]() {
+            const std::wstring svcExe = (exeDir / L"IrisService.exe").wstring();
+            if (!std::filesystem::exists(svcExe)) {
+                tray.ShowWarningNotification(QString::fromUtf8("Iris"),
+                    QString::fromUtf8("未找到 IrisService.exe（与服务需同目录部署）"));
+                return;
+            }
+            const HINSTANCE h = ShellExecuteW(nullptr, L"runas", svcExe.c_str(),
+                                              L"--install", nullptr, SW_SHOWNORMAL);
+            if (reinterpret_cast<INT_PTR>(h) <= 32) return;  // UAC 取消 → 保持现状
+            // 延迟确认安装结果（非提权可查询服务状态）
+            QTimer::singleShot(2500, &tray, [&tray]() {
+                SC_HANDLE scm = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
+                bool running = false;
+                if (scm) {
+                    SC_HANDLE s = OpenServiceW(scm, iris::usnbroker::kServiceName,
+                                               SERVICE_QUERY_STATUS);
+                    if (s) {
+                        SERVICE_STATUS st{};
+                        running = QueryServiceStatus(s, &st) &&
+                                  st.dwCurrentState == SERVICE_RUNNING;
+                        CloseServiceHandle(s);
+                    }
+                    CloseServiceHandle(scm);
+                }
+                if (running) {
+                    tray.ShowNotification(QString::fromUtf8("Iris"),
+                                          QString::fromUtf8("实时更新服务已就绪"));
+                } else {
+                    tray.ShowWarningNotification(QString::fromUtf8("Iris"),
+                        QString::fromUtf8("服务安装未确认，可重试或重启后观察"));
+                }
+            });
+        });
 
     if (!minimized) {
         w.showWithFadeIn();  // 窗口先于索引显示（输入框为空 → 列表不显示，仅输入框）

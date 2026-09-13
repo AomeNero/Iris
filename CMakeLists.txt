@@ -55,6 +55,8 @@ add_subdirectory(third_party/cpp-pinyin)
 file(GLOB_RECURSE IRIS_SOURCES CONFIGURE_DEPENDS
     ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/*.h)
+# IrisService 的入口不能进 Iris.exe（与 WinMain 冲突）；协议/客户端照常纳入
+list(FILTER IRIS_SOURCES EXCLUDE REGEX "src/service/ServiceMain\\.cpp$")
 
 add_executable(Iris WIN32
     ${IRIS_SOURCES}
@@ -76,6 +78,17 @@ set_target_properties(Iris PROPERTIES
 # 清单由 resources/iris.rc 提供，关闭链接器自动生成的 manifest 避免 CVT1100 重复资源。
 target_link_options(Iris PRIVATE /MANIFEST:NO)
 set(CMAKE_RC_FLAGS "${CMAKE_RC_FLAGS} /I\"${CMAKE_CURRENT_SOURCE_DIR}/resources\"")
+
+# ---- IrisService：USN 句柄经纪服务（纯 Win32，无 Qt；设计见 doc/service-design.md §5）----
+# 控制台子系统（SCM 启动无控制台，--console/--install 调试时有输出）
+add_executable(IrisService
+    src/service/ServiceMain.cpp
+    src/service/ServiceProtocol.cpp)
+target_include_directories(IrisService PRIVATE src)
+target_compile_options(IrisService PRIVATE /W4)
+set_target_properties(IrisService PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/service)  # 不混入发布目录 build/Release
+target_link_libraries(IrisService PRIVATE advapi32)
 
 # ---- 测试 ----
 enable_testing()

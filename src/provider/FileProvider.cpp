@@ -6,6 +6,7 @@
 #include "core/StringUtil.h"
 #include "core/WinUtil.h"
 #include "provider/IndexSnapshot.h"
+#include "service/UsnBrokerClient.h"
 
 #include <algorithm>
 #include <array>
@@ -256,9 +257,24 @@ bool FileProvider::BuildVolumeIndex(VolumeInfo& vol, IndexStore& store,
                            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                            nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (h == INVALID_HANDLE_VALUE) {
-        IRIS_LOG_WARN(L"打开卷句柄失败 err=" + std::to_wstring(GetLastError()) +
-                      L" : " + volHandlePath);
-        return false;
+        const DWORD openErr = GetLastError();
+        // 非提权（err=5）→ 向 IrisService（若已安装运行）请求 SYSTEM 卷句柄；
+        // 服务不可用则维持既有降级（FallbackScan + usnDisabled），绝不重建。
+        if (openErr == ERROR_ACCESS_DENIED) {
+            uint32_t brokerErr = 0;
+            if (usnbroker::OpenVolume(vol.driveLetter, h, &brokerErr)) {
+                vol.handleFromService = true;
+                IRIS_LOG_INFO(L"卷句柄来自 IrisService: " + volHandlePath);
+            } else {
+                IRIS_LOG_WARN(L"IrisService 句柄经纪不可用 err=" +
+                              std::to_wstring(brokerErr) + L"，降级遍历");
+            }
+        }
+        if (h == INVALID_HANDLE_VALUE) {
+            IRIS_LOG_WARN(L"打开卷句柄失败 err=" + std::to_wstring(openErr) +
+                          L" : " + volHandlePath);
+            return false;
+        }
     }
 
     // 查询 USN Journal 状态

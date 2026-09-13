@@ -87,8 +87,9 @@ private:
         uint64_t     journalId = 0;
         bool         isNTFS = false;
         // —— 监听策略状态（guard: volumesMutex_）——
-        bool     usnDisabled    = false;  // 该卷监听已禁用（权限/句柄不可恢复）
-        uint32_t backoffFails   = 0;      // 未知错误连续失败计数
+        bool     usnDisabled       = false;  // 该卷监听已禁用（权限/句柄不可恢复）
+        bool     handleFromService = false;  // 卷句柄来自 IrisService（诊断用）
+        uint32_t backoffFails      = 0;      // 未知错误连续失败计数
         uint64_t backoffDelayMs = 0;      // 未知错误退避间隔（0 = 不退避）
         uint64_t lastPollMs     = 0;      // 上次尝试轮询时刻（退避计时）
     };

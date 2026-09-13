@@ -77,6 +77,14 @@ add_iris_test(test_usn_watch_policy
     ${SRC}/provider/UsnWatchPolicy.cpp
     ${SRC}/provider/RebuildBreaker.cpp)
 
+# ---- 服务协议 + 经纪客户端（协议纯逻辑单测 + 集成：拉起 --console 服务端；
+#      IrisService 未构建时集成用例自跳过）----
+add_iris_test(test_service_broker
+    test_service_broker.cpp
+    ${SRC}/service/ServiceProtocol.cpp
+    ${SRC}/service/UsnBrokerClient.cpp
+    LINK advapi32)
+
 # ---- DeltaOverlay（基础索引 + delta 组合视图；IndexStore 纯头 + Trigram 实现）----
 add_iris_test(test_delta_overlay
     test_delta_overlay.cpp
@@ -94,6 +102,8 @@ add_iris_test(test_file_provider
     ${SRC}/provider/ISearchableProvider.h
     ${SRC}/provider/FileProvider.h
     ${SRC}/provider/FileProvider.cpp
+    ${SRC}/service/ServiceProtocol.cpp
+    ${SRC}/service/UsnBrokerClient.cpp
     ${SRC}/provider/UsnWatchPolicy.cpp
     ${SRC}/provider/RebuildBreaker.cpp
     ${SRC}/provider/IndexSnapshot.cpp

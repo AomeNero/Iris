@@ -39,6 +39,7 @@ signals:
     void quitRequested();      // "退出"
     void autoStartToggled(bool enabled);  // "开机自启"勾选项切换
     void restartAsAdminRequested();       // "以管理员重启"
+    void installServiceRequested();       // "安装实时更新服务"
 
 private:
     void BuildMenu();
