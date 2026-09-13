@@ -429,22 +429,14 @@ void FileProvider::FallbackScan(const VolumeInfo& vol, IndexStore& store,
 }
 
 // ============================================================================
-// Refresh：增量 USN 更新（失败则全量重建）
+// Refresh：手动全量重建（托盘"重新索引"）
 // ============================================================================
 void FileProvider::Refresh() {
-    // 简化实现：增量失败则触发完整重建（保持索引新鲜）。
-    // 完整的增量（FSCTL_READ_USN_JOURNAL + CREATE/DELETE/RENAME 处理）在
-    // 大规模部署时再精细化。此处优先保证正确性。
-    bool changed = false;
-    // 尝试增量；任何异常都退化到全量。
-    try {
-        // TODO(P1 精细化): 对每个卷读 USN 增量并应用。
-        // 此处暂时只重新全量构建（30s 间隔下可接受，或后续优化）。
-        (void)changed;
-    } catch (...) {
-        IRIS_LOG_WARN(L"FileProvider 增量异常");
-    }
-    // 当前实现：不做增量；由 App 的定时全量重建负责刷新（见 IndexCoordinator）。
+    // 绕过熔断（用户显式意图，不占也不计入 1178/1179 额度）；CAS 防重入与其他
+    // 重建共用——重建中再点 = 合并进行中的重建。完成时经 dataChanged 通知，
+    // main 侧 armed 标志放行才弹气泡（避免启动校准误弹）。
+    IRIS_LOG_INFO(L"手动全量重建（Refresh）");
+    TriggerRebuild(RebuildReason::Manual);
 }
 
 // ============================================================================

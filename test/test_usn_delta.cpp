@@ -196,6 +196,25 @@ TEST(UsnDeltaTest, ShouldCompactNotWhenEmpty) {
     EXPECT_FALSE(d.ShouldCompact(1000000));  // 空 delta 永不触发
 }
 
+// ---- 默认策略（v1.4.1 止血）：compact=全量重建+重写整份快照（O(N) 悬崖），
+// ---- 旧默认（5000 条/10 分钟）使活跃磁盘约 10 分钟烧一轮满核。----
+TEST(UsnDeltaTest, DefaultPolicyAgeTriggerAt24h) {
+    UsnDelta d;  // 默认 Policy
+    d.Apply(Ev(1, USN_REASON_FILE_CREATE), 1000);
+    EXPECT_FALSE(d.ShouldCompact(1000 + 10ull * 60 * 1000));          // 10 分钟：不触发
+    EXPECT_FALSE(d.ShouldCompact(1000 + 23ull * 60 * 60 * 1000));     // 23h：不触发
+    EXPECT_TRUE(d.ShouldCompact(1000 + 24ull * 60 * 60 * 1000));      // 24h：触发
+}
+
+TEST(UsnDeltaTest, DefaultPolicyCountTriggerAt50k) {
+    UsnDelta d;
+    for (uint64_t i = 1; i <= 49999; ++i)
+        d.Apply(Ev(i, USN_REASON_FILE_CREATE), i);
+    EXPECT_FALSE(d.ShouldCompact(50000));  // 49999 条 < 50k：不触发
+    d.Apply(Ev(50000, USN_REASON_FILE_CREATE), 50000);
+    EXPECT_TRUE(d.ShouldCompact(50000));   // 第 50000 条：按条数触发
+}
+
 TEST(UsnDeltaTest, ClearResetsAll) {
     UsnDelta d;
     d.Apply(Ev(7, USN_REASON_RENAME_OLD_NAME, L"old.txt"), 100);

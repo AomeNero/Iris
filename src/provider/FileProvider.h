@@ -120,7 +120,7 @@ private:
     void FinalizeAndSwap(std::shared_ptr<IndexStore> store); // 落盘+切视图+清 delta
 
     // —— USN 实时增量（监听线程；轮询各 NTFS 卷的增量并应用 delta）——
-    enum class RebuildReason { JournalInvalid, Compact };
+    enum class RebuildReason { JournalInvalid, Compact, Manual };
     enum class ReopenResult { Ok, Failed, JournalChanged };
     void UsnWatchLoop();
     // 调用方须持有 deltaMutex_。返回 0 = 成功（含无增量 EOF），否则 Win32 错误码

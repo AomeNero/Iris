@@ -33,8 +33,12 @@ public:
     };
 
     struct Policy {
-        size_t   maxChanges = 5000;          // 条数阈值
-        uint64_t maxAgeMs = 10 * 60 * 1000;  // 存在变更时的最长滞留
+        // v1.4.1 止血：compact = 全量重建 + 重写整份快照（O(N)）。旧默认
+        // （5000 条/10 分钟）使活跃磁盘约 10 分钟烧一轮满核 + 1.5GB 落盘；
+        // 24h/50k 把最坏情况压到 ~1 次重建/天。代价：崩溃时索引最长陈旧
+        // 24h——重启即全量校准，无实际影响。LSM 增量持久化落地前的临时桥。
+        size_t   maxChanges = 50000;                 // 条数阈值
+        uint64_t maxAgeMs = 24ull * 60 * 60 * 1000;  // 存在变更时的最长滞留
     };
 
     explicit UsnDelta(Policy policy = {}) : policy_(policy) {}

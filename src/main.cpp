@@ -196,14 +196,25 @@ int main(int argc, char* argv[]) {
     QObject::connect(&tray, &TrayIcon::searchRequested, &w, [&w]() {
         w.showWithFadeIn();
     });
+    // "重新索引"：文件索引重建为分钟级异步任务——armed 标志 + FileProvider
+    // dataChanged 在真正完成后提示（旧实现是"先弹完成、再开始干活"）
+    bool reindexNotifyArmed = false;
     QObject::connect(&tray, &TrayIcon::reindexRequested, &tray,
-        [&tray, &file, &bookmark, &apps]() {
+        [&file, &bookmark, &apps, &reindexNotifyArmed]() {
+            reindexNotifyArmed = true;
             if (file)     file->Refresh();
             if (bookmark) bookmark->Refresh();
             if (apps)     apps->Refresh();
-            tray.ShowNotification(QString::fromUtf8("Iris"),
-                                  QString::fromUtf8("重新索引完成"));
         });
+    if (file) {
+        QObject::connect(file.get(), &iris::IProvider::dataChanged, &tray,
+            [&tray, &reindexNotifyArmed]() {
+                if (!reindexNotifyArmed) return;  // 启动校准/compact 完成不打扰
+                reindexNotifyArmed = false;
+                tray.ShowNotification(QString::fromUtf8("Iris"),
+                                      QString::fromUtf8("重新索引完成"));
+            });
+    }
     QObject::connect(&tray, &TrayIcon::settingsRequested, []() {
         // 打开 config.json 供用户编辑（重启 Iris 后生效）
         const std::wstring p = Config::Instance().GetConfigPath().wstring();
