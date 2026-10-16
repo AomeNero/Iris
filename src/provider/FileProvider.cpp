@@ -32,29 +32,10 @@ constexpr std::array kExcludedExtensions = {
     L".sys",  L".dll",  L".ocx",   L".drv",
 };
 
-// 临时条目：全量枚举后建索引前的中间结构
-struct TempEntry {
-    std::wstring name;
-    uint64_t     frn        = 0;
-    uint64_t     parentFrn  = 0;
-    DWORD        attributes = 0;
-};
-
-// 解析单个 USN_RECORD，写入 TempEntry。返回记录长度（0 表示结束/无效）。
-DWORD ParseUsnRecord(const USN_RECORD* rec, TempEntry& out) {
-    if (rec->RecordLength == 0) return 0;
-    out.frn       = rec->FileReferenceNumber;
-    out.parentFrn = rec->ParentFileReferenceNumber;
-    out.attributes = rec->FileAttributes;
-    const wchar_t* name = reinterpret_cast<const wchar_t*>(
-        reinterpret_cast<const BYTE*>(rec) + rec->FileNameOffset);
-    out.name.assign(name, rec->FileNameLength / sizeof(wchar_t));
-    return rec->RecordLength;
-}
-
 // 由 FRN 链重建目录完整路径（带缓存）。返回路径与深度。
+// all 的值类型是 UsnEvent —— 全项目唯一一份 USN 记录表示（见 UsnRecordParser.h）。
 std::wstring BuildDirPath(uint64_t dirFrn,
-                          const std::unordered_map<uint64_t, TempEntry>& all,
+                          const std::unordered_map<uint64_t, UsnEvent>& all,
                           const std::wstring& rootPath,
                           std::unordered_map<uint64_t, std::wstring>& cache,
                           uint8_t& depthOut) {
@@ -188,13 +169,18 @@ std::shared_ptr<IndexStore> FileProvider::BuildFullIndex() {
         vol.isNTFS = WinUtil::IsNTFSVolume(root);
 
         if (vol.isNTFS) {
-            if (!BuildVolumeIndex(vol, *store, dirIdByFrn)) {
+            const VolumeBuildOutcome outcome = BuildVolumeIndex(vol, *store, dirIdByFrn);
+            if (outcome == VolumeBuildOutcome::Cancelled) {
+                return nullptr;  // 退出中：安静返回，不降级遍历、不禁用监听
+            }
+            if (outcome != VolumeBuildOutcome::Ok) {
+                // 具体原因（无句柄 / journal 缺失 / 枚举不完整）由 BuildVolumeIndex 记日志
                 IRIS_LOG_WARN(L"NTFS 索引失败，降级遍历: " + root);
                 FallbackScan(vol, *store, dirIdByFrn);
                 // USN 不可用（典型：非提权开卷 err=5）→ 禁用该卷监听，索引保持
                 // 静态快照；绝不以此为由全量重建（v1.4.0 重建风暴根因）。
                 vol.usnDisabled = true;
-                IRIS_LOG_WARN(L"USN 监听已禁用: " + root + L"（无法获得卷句柄）");
+                IRIS_LOG_WARN(L"USN 监听已禁用: " + root);
             }
         } else {
             IRIS_LOG_INFO(L"非 NTFS 卷，降级遍历: " + root);
@@ -250,8 +236,9 @@ void FileProvider::FinalizeAndSwap(std::shared_ptr<IndexStore> store) {
 // ============================================================================
 // BuildVolumeIndex：单个 NTFS 卷的全量索引
 // ============================================================================
-bool FileProvider::BuildVolumeIndex(VolumeInfo& vol, IndexStore& store,
-                                    std::unordered_map<uint64_t, uint16_t>& dirIdByFrn) {
+FileProvider::VolumeBuildOutcome FileProvider::BuildVolumeIndex(
+    VolumeInfo& vol, IndexStore& store,
+    std::unordered_map<uint64_t, uint16_t>& dirIdByFrn) {
     const std::wstring volHandlePath = L"\\\\.\\" + std::wstring(1, vol.driveLetter) + L":";
     HANDLE h = CreateFileW(volHandlePath.c_str(), GENERIC_READ,
                            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
@@ -273,7 +260,7 @@ bool FileProvider::BuildVolumeIndex(VolumeInfo& vol, IndexStore& store,
         if (h == INVALID_HANDLE_VALUE) {
             IRIS_LOG_WARN(L"打开卷句柄失败 err=" + std::to_wstring(openErr) +
                           L" : " + volHandlePath);
-            return false;
+            return VolumeBuildOutcome::NoHandle;
         }
     }
 
@@ -284,12 +271,13 @@ bool FileProvider::BuildVolumeIndex(VolumeInfo& vol, IndexStore& store,
         IRIS_LOG_WARN(L"FSCTL_QUERY_USN_JOURNAL 失败 err=" + std::to_wstring(GetLastError()) +
                       L" : " + volHandlePath);
         CloseHandle(h);
-        return false;
+        return VolumeBuildOutcome::NoJournal;
     }
 
     // 全量枚举：FSCTL_ENUM_USN_DATA V0，MinFRN=0, MaxFRN=max
-    // 先收集所有 TempEntry（FRN → name/parent/attrs）
-    std::unordered_map<uint64_t, TempEntry> all;
+    // 先收集所有条目（FRN → UsnEvent）。构建期同时存在约 284 万份，
+    // 尺寸预算由 UsnRecordParser.h 的 static_assert 钉住。
+    std::unordered_map<uint64_t, UsnEvent> all;
     all.reserve(1 << 16);
 
     MFT_ENUM_DATA_V0 med{};
@@ -300,30 +288,51 @@ bool FileProvider::BuildVolumeIndex(VolumeInfo& vol, IndexStore& store,
     constexpr DWORD kBufSize = 64 * 1024;
     std::vector<BYTE> buffer(kBufSize);
 
+    // 枚举是否读到正常收尾。中途 I/O 失败或遇到不可信记录都算"不完整"：
+    // 此时基础索引残缺，而函数末尾会把 lastUsn 设成 journal 末尾——那批从未
+    // 枚举到的文件再无 delta 可补（READ_USN_JOURNAL 是变更重放，补不回"从未
+    // 变更"的文件）。故宁可整卷判失败，由调用方降级遍历出一份完整索引。
+    bool enumIncomplete = false;
     while (true) {
         if (cancelInitialize_.load(std::memory_order_acquire)) {
             CloseHandle(h);
-            return false;  // 取消：关闭卷句柄，不泄漏
+            return VolumeBuildOutcome::Cancelled;  // 取消：关闭卷句柄，不泄漏
         }
         br = 0;
-        BOOL ok = DeviceIoControl(h, FSCTL_ENUM_USN_DATA, &med, sizeof(med),
-                                  buffer.data(), kBufSize, &br, nullptr);
-        if (!ok || br < sizeof(USN)) break;
+        const BOOL ok = DeviceIoControl(h, FSCTL_ENUM_USN_DATA, &med, sizeof(med),
+                                        buffer.data(), kBufSize, &br, nullptr);
+        if (!ok) {
+            IRIS_LOG_WARN(L"FSCTL_ENUM_USN_DATA 失败 err=" +
+                          std::to_wstring(GetLastError()) + L" : " + volHandlePath);
+            enumIncomplete = true;
+            break;
+        }
+        if (br < sizeof(USN)) break;  // 无更多记录
 
         // 缓冲区前 8 字节 = 下一次枚举的起始 FRN
         USN nextUsn = *reinterpret_cast<USN*>(buffer.data());
         DWORD off = sizeof(USN);
-        while (off + sizeof(USN_RECORD) <= br) {
-            const USN_RECORD* rec = reinterpret_cast<const USN_RECORD*>(buffer.data() + off);
-            TempEntry te;
-            DWORD len = ParseUsnRecord(rec, te);
-            if (len == 0) break;
-            all[te.frn] = std::move(te);
-            off += len;
+        while (off + sizeof(USN_RECORD_V2) <= br) {
+            UsnEvent ev;
+            const size_t used = ParseUsnRecord(buffer.data() + off, br - off, ev);
+            if (used == 0) {
+                IRIS_LOG_WARN(L"USN 记录不可信（已收 " + std::to_wstring(all.size()) +
+                              L" 条）: " + volHandlePath);
+                enumIncomplete = true;
+                break;
+            }
+            all[ev.frn] = std::move(ev);
+            off += static_cast<DWORD>(used);
         }
+        if (enumIncomplete) break;
         // 继续：更新 StartFRN 为返回的下一个 USN（V0 用 NextUsn 继续）
         med.StartFileReferenceNumber = nextUsn;
         if (br < kBufSize) break;  // 读完
+    }
+
+    if (enumIncomplete) {
+        CloseHandle(h);  // h 所有权尚未移交 vol
+        return VolumeBuildOutcome::EnumIncomplete;
     }
 
     // 第一遍：建目录表（所有 FILE_ATTRIBUTE_DIRECTORY 条目）
@@ -371,7 +380,7 @@ bool FileProvider::BuildVolumeIndex(VolumeInfo& vol, IndexStore& store,
     vol.hVolume = h;
     vol.lastUsn = jd.NextUsn;
     vol.journalId = jd.UsnJournalID;
-    return true;
+    return VolumeBuildOutcome::Ok;
 }
 
 // ============================================================================
@@ -587,8 +596,16 @@ uint32_t FileProvider::ReadVolumeUsnDelta(VolumeInfo& vol) {
     UsnEvent ev;
     while (off + sizeof(USN_RECORD_V2) <= br) {
         const size_t used = ParseUsnRecord(buf.data() + off, br - off, ev);
-        if (used == 0) break;
-        off += used;
+        if (used == 0) {
+            // 记录不可信 → 本批剩余事件（含 DELETE / RENAME）无法解析。若照旧
+            // 推进 lastUsn，它们永久丢失：已删文件留在索引里、改名不生效；丢在
+            // 批尾时 delta 归零还会永不 compact。与 ENUM 路径同一原则——前提被
+            // 打破就停下并禁用该卷监听（复用 DisableVolume 语义），不谎报游标。
+            IRIS_LOG_WARN(L"USN 记录不可信，禁用该卷监听: " + vol.rootPath);
+            vol.usnDisabled = true;
+            return 0;  // 不推进 lastUsn
+        }
+        off += static_cast<DWORD>(used);
         if (ev.attributes & FILE_ATTRIBUTE_DIRECTORY) continue;  // 目录事件忽略
         if (ShouldExclude(ev.attributes, ev.name, excludeHidden_, excludeSystem_)) continue;
         delta_->Apply(ev, NowMs());

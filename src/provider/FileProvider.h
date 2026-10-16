@@ -94,10 +94,21 @@ private:
         uint64_t lastPollMs     = 0;      // 上次尝试轮询时刻（退避计时）
     };
 
-    // 构建一个卷的索引（全量），填充 store。返回 true 成功。
+    // 构建一个卷的索引（全量），填充 store。
     // 成功时把打开的卷句柄与 USN 游标写回 vol（所有权随 vol 移交 volumes_）。
-    bool BuildVolumeIndex(VolumeInfo& vol, IndexStore& store,
-                          std::unordered_map<uint64_t, uint16_t>& dirIdByFrn);
+    //
+    // 结果区分降级原因：调用方仅对 Cancelled 安静返回，其余失败一律
+    // FallbackScan + 禁用该卷监听（可见降级优于静默继续，见 UsnWatchPolicy.h）。
+    // 失败时保证未改动 store、未接管句柄（句柄已关闭）。
+    enum class VolumeBuildOutcome {
+        Ok,
+        Cancelled,       // cancelInitialize_：退出中，不降级
+        NoHandle,        // 开卷失败（含 IrisService 经纪不可用）
+        NoJournal,       // FSCTL_QUERY_USN_JOURNAL 失败
+        EnumIncomplete,  // 枚举中途失败或记录不可信 → 索引残缺，不可作为 base
+    };
+    VolumeBuildOutcome BuildVolumeIndex(VolumeInfo& vol, IndexStore& store,
+                                        std::unordered_map<uint64_t, uint16_t>& dirIdByFrn);
 
     // 非 NTFS 降级扫描
     void FallbackScan(const VolumeInfo& vol, IndexStore& store,
