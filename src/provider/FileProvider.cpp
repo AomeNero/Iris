@@ -288,10 +288,16 @@ FileProvider::VolumeBuildOutcome FileProvider::BuildVolumeIndex(
     constexpr DWORD kBufSize = 64 * 1024;
     std::vector<BYTE> buffer(kBufSize);
 
-    // 枚举是否读到正常收尾。中途 I/O 失败或遇到不可信记录都算"不完整"：
-    // 此时基础索引残缺，而函数末尾会把 lastUsn 设成 journal 末尾——那批从未
-    // 枚举到的文件再无 delta 可补（READ_USN_JOURNAL 是变更重放，补不回"从未
-    // 变更"的文件）。故宁可整卷判失败，由调用方降级遍历出一份完整索引。
+    // 枚举是否读到正常收尾。真失败（非 ERROR_HANDLE_EOF）或遇到不可信记录都算
+    // "不完整"：此时基础索引残缺，而函数末尾会把 lastUsn 设成 journal 末尾——
+    // 那批从未枚举到的文件再无 delta 可补（READ_USN_JOURNAL 是变更重放，补不回
+    // "从未变更"的文件）。故宁可整卷判失败，由调用方降级遍历出一份完整索引。
+    //
+    // 收尾语义（已实测，勿改）：FSCTL_ENUM_USN_DATA 是续枚举 API，靠内核回填的
+    // "下一批起点 FRN"逐批推进，收尾信号是 DeviceIoControl 失败且
+    // GetLastError()==ERROR_HANDLE_EOF(38)。绝不可拿"本批没填满 64KB"当收尾：
+    // 记录按 8 字节对齐、内核装不下下一条即停手，故 br 几乎永不等于 kBufSize——
+    // 用短读判断会让循环永远只跑一批（实测 C: 上 2,406,460 条只取到 617 条）。
     bool enumIncomplete = false;
     while (true) {
         if (cancelInitialize_.load(std::memory_order_acquire)) {
@@ -302,15 +308,18 @@ FileProvider::VolumeBuildOutcome FileProvider::BuildVolumeIndex(
         const BOOL ok = DeviceIoControl(h, FSCTL_ENUM_USN_DATA, &med, sizeof(med),
                                         buffer.data(), kBufSize, &br, nullptr);
         if (!ok) {
-            IRIS_LOG_WARN(L"FSCTL_ENUM_USN_DATA 失败 err=" +
-                          std::to_wstring(GetLastError()) + L" : " + volHandlePath);
+            const DWORD err = GetLastError();
+            if (err == ERROR_HANDLE_EOF) break;  // 正常收尾：已枚举到卷尾
+            IRIS_LOG_WARN(L"FSCTL_ENUM_USN_DATA 失败 err=" + std::to_wstring(err) +
+                          L"（已收 " + std::to_wstring(all.size()) + L" 条）: " +
+                          volHandlePath);
             enumIncomplete = true;
             break;
         }
-        if (br < sizeof(USN)) break;  // 无更多记录
+        if (br < sizeof(USN)) break;  // 无"下一批起点"，收尾
 
         // 缓冲区前 8 字节 = 下一次枚举的起始 FRN
-        USN nextUsn = *reinterpret_cast<USN*>(buffer.data());
+        const USN nextUsn = *reinterpret_cast<const USN*>(buffer.data());
         DWORD off = sizeof(USN);
         while (off + sizeof(USN_RECORD_V2) <= br) {
             UsnEvent ev;
@@ -325,9 +334,14 @@ FileProvider::VolumeBuildOutcome FileProvider::BuildVolumeIndex(
             off += static_cast<DWORD>(used);
         }
         if (enumIncomplete) break;
-        // 继续：更新 StartFRN 为返回的下一个 USN（V0 用 NextUsn 继续）
+        // 游标未推进则再调只会拿到同一批 → 防死循环
+        if (static_cast<DWORDLONG>(nextUsn) == med.StartFileReferenceNumber) {
+            IRIS_LOG_WARN(L"USN 枚举游标未推进，提前收尾（已收 " +
+                          std::to_wstring(all.size()) + L" 条）: " + volHandlePath);
+            break;
+        }
+        // 继续：更新 StartFRN 为内核回填的下一批起点（V0 用 NextUsn 继续）
         med.StartFileReferenceNumber = nextUsn;
-        if (br < kBufSize) break;  // 读完
     }
 
     if (enumIncomplete) {
